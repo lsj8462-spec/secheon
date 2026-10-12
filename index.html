@@ -1529,7 +1529,33 @@
 
     /* ========================================================== */
     /* P2P 실시간 통신 (선생님 & 학생 온라인 전용 동기화) */
+    /* STUN + TURN (OpenRelay) 다중 중계 서버 탑재로 외부망/LTE/학교 방화벽 완벽 관통 */
     /* ========================================================== */
+    const WEBRTC_CONFIG = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:openrelay.metered.ca:80' },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        }
+      ],
+      iceCandidatePoolSize: 10
+    };
+
     let teacherPeer = null;
     let studentPeer = null;
     let studentConnToTeacher = null;
@@ -1546,20 +1572,37 @@
         return;
       }
       if (!roomPin) roomPin = generateRoomPin();
-      document.getElementById('teacherRoomPin').textContent = roomPin;
+      const pinEl = document.getElementById('teacherRoomPin');
+      if (pinEl) pinEl.textContent = roomPin;
 
       const peerId = `streams-room-${roomPin}`;
       try {
+        if (teacherPeer) {
+          try { teacherPeer.destroy(); } catch (e) {}
+          teacherPeer = null;
+        }
+
         teacherPeer = new Peer(peerId, {
-          config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:global.stun.twilio.com:3478' }
-            ]
-          }
+          config: WEBRTC_CONFIG,
+          debug: 1
         });
 
-        teacherPeer.on('open', () => renderRoomQRCode(roomPin));
+        teacherPeer.on('open', (id) => {
+          console.log('Teacher room active:', id);
+          if (pinEl) {
+            pinEl.textContent = roomPin;
+            pinEl.style.color = '#10b981';
+            pinEl.style.borderColor = '#10b981';
+          }
+          renderRoomQRCode(roomPin);
+          showToast(`🟢 교사용 방 [${roomPin}] 준비 완료! 학생 입장을 기다립니다.`);
+        });
+
+        teacherPeer.on('disconnected', () => {
+          console.warn('Teacher peer disconnected from signaling server, reconnecting...');
+          if (pinEl) pinEl.style.color = '#f59e0b';
+          try { teacherPeer.reconnect(); } catch (e) {}
+        });
 
         teacherPeer.on('connection', (conn) => {
           conn.on('data', (data) => handleTeacherReceivedData(conn, data));
@@ -1567,15 +1610,23 @@
             connectedStudentsMap.delete(conn.peer);
             updateConnectedStudentsUI();
           });
+          conn.on('error', (err) => {
+            console.warn('Connection error with student:', err);
+          });
         });
 
         teacherPeer.on('error', (err) => {
+          console.error('Teacher peer error:', err);
           if (err.type === 'unavailable-id') {
             roomPin = generateRoomPin();
             startTeacherRoom();
+          } else {
+            showToast(`⚠️ 교사용 방 통신 알림: ${err.type}`);
           }
         });
-      } catch (e) {}
+      } catch (e) {
+        console.error('startTeacherRoom error:', e);
+      }
     }
 
     function renderRoomQRCode(pin) {
@@ -1585,7 +1636,7 @@
         new QRCode(container, {
           text: fullUrl,
           width: 65, height: 65,
-          correctLevel: QRCode.CorrectLevel.M
+          correctLevel: (QRCode.CorrectLevel ? QRCode.CorrectLevel.M : 1)
         });
       }
     }
@@ -1731,26 +1782,43 @@
         return;
       }
 
+      // 이전 연결 정리
+      if (studentConnToTeacher) {
+        try { studentConnToTeacher.close(); } catch (e) {}
+        studentConnToTeacher = null;
+      }
+      if (studentPeer) {
+        try { studentPeer.destroy(); } catch (e) {}
+        studentPeer = null;
+      }
+
       const dot = document.getElementById('studentStatusDot');
       const text = document.getElementById('studentNetworkText');
       dot.className = 'status-dot';
       text.textContent = '연결 시도 중...';
 
+      let connectTimeoutTimer = setTimeout(() => {
+        if (!studentConnToTeacher || !studentConnToTeacher.open) {
+          dot.className = 'status-dot';
+          text.textContent = '연결 지연 (다시 시도)';
+          showToast('⚠️ 연결이 지연되고 있습니다. 선생님 화면(방 PIN)이 열려 있는지 확인하고 다시 [입장하기]를 눌러주세요.');
+        }
+      }, 15000);
+
       try {
         studentPeer = new Peer({
-          config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:global.stun.twilio.com:3478' }
-            ]
-          }
+          config: WEBRTC_CONFIG,
+          debug: 1
         });
 
         studentPeer.on('open', () => {
           const teacherPeerId = `streams-room-${pin}`;
-          studentConnToTeacher = studentPeer.connect(teacherPeerId);
+          studentConnToTeacher = studentPeer.connect(teacherPeerId, {
+            reliable: true
+          });
 
           studentConnToTeacher.on('open', () => {
+            clearTimeout(connectTimeoutTimer);
             dot.className = 'status-dot online';
             text.textContent = `🟢 방 [${pin}] 연결됨: ${name}`;
             document.getElementById('studentJoinDropdown').style.display = 'none';
@@ -1800,13 +1868,39 @@
               showToast(data.reason || '선생님에 의해 퇴장되었습니다. 본명으로 다시 입장하세요!');
             }
           });
+
+          studentConnToTeacher.on('close', () => {
+            clearTimeout(connectTimeoutTimer);
+            dot.className = 'status-dot';
+            text.textContent = '연결 끊김 (다시 입장)';
+            showToast('⚠️ 선생님과의 연결이 끊어졌습니다. 다시 입장해주세요.');
+          });
+
+          studentConnToTeacher.on('error', (err) => {
+            clearTimeout(connectTimeoutTimer);
+            console.error('Student conn error:', err);
+            dot.className = 'status-dot';
+            text.textContent = '연결 오류 (다시 시도)';
+            showToast('⚠️ 연결 통신 오류가 발생했습니다.');
+          });
         });
 
-        studentPeer.on('error', () => {
+        studentPeer.on('error', (err) => {
+          clearTimeout(connectTimeoutTimer);
+          console.error('Student peer error:', err);
           dot.className = 'status-dot';
-          text.textContent = '연결 실패 (PIN 확인)';
+          if (err.type === 'peer-unavailable') {
+            text.textContent = '방을 찾을 수 없음 (PIN 확인)';
+            showToast(`❌ 방 [${pin}]을 찾을 수 없습니다! 선생님 화면에 뜬 방 번호가 맞는지 확인해주세요.`);
+          } else {
+            text.textContent = '연결 실패: ' + err.type;
+            showToast(`⚠️ 연결 실패 (${err.type}). 잠시 후 다시 시도해주세요.`);
+          }
         });
-      } catch (e) {}
+      } catch (e) {
+        clearTimeout(connectTimeoutTimer);
+        console.error('Peer init error:', e);
+      }
     }
 
     /* 교사용 뽑기 */
