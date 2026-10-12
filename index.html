@@ -664,9 +664,10 @@
   <header>
     <div class="brand">
       <div class="brand-icon">★</div>
-      <div class="brand-title">STREAMS</div>
+      <div class="brand-title">STREAMS <span style="font-size: 0.65rem; background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 800; margin-left: 2px;">v2.1 클라우드</span></div>
     </div>
     <div class="header-controls">
+      <span id="globalCloudStatus" style="font-size: 0.72rem; color: #94a3b8; font-weight: 700; margin-right: 4px;">서버: 연결 중...</span>
 
       <button class="btn-icon" id="btnTeacherAuth" title="선생님 모드 전환" style="width: auto; padding: 0 10px; font-weight: 700; font-size: 0.8rem; gap: 4px; display: inline-flex;">
         <span id="teacherAuthIcon">🔒</span> <span id="teacherAuthText">교사 인증</span>
@@ -1535,7 +1536,8 @@
     /* ========================================================== */
     const MQTT_BROKERS = [
       'wss://broker.emqx.io:8084/mqtt',
-      'wss://broker.hivemq.com:8884/mqtt'
+      'wss://broker.hivemq.com:8884/mqtt',
+      'wss://test.mosquitto.org:8081/mqtt'
     ];
 
     let mqttClient = null;
@@ -1549,6 +1551,14 @@
     let roomPin = '';
     const connectedStudentsMap = new Map();
 
+    function updateCloudStatus(status, isOk = true) {
+      const el = document.getElementById('globalCloudStatus');
+      if (el) {
+        el.textContent = '서버: ' + (isOk ? '🟢 ' : '🟡 ') + status;
+        el.style.color = isOk ? '#34d399' : '#f59e0b';
+      }
+    }
+
     function initMqttClient(onReady) {
       if (mqttClient && mqttClient.connected) {
         if (onReady) onReady();
@@ -1556,24 +1566,32 @@
       }
 
       if (typeof mqtt === 'undefined') {
-        console.warn('MQTT library loading...');
+        updateCloudStatus('라이브러리 로딩 중...', false);
         setTimeout(() => initMqttClient(onReady), 200);
         return;
       }
 
       const brokerUrl = MQTT_BROKERS[currentBrokerIdx];
       const clientId = 'streams_' + Math.random().toString(16).substring(2, 10);
+      updateCloudStatus('클라우드 연결 중...', false);
 
       try {
+        if (mqttClient) {
+          try { mqttClient.end(true); } catch (e) {}
+          mqttClient = null;
+        }
+
         mqttClient = mqtt.connect(brokerUrl, {
           clientId: clientId,
           clean: true,
-          keepalive: 30,
-          reconnectPeriod: 2500
+          keepalive: 20,
+          reconnectPeriod: 2000,
+          connectTimeout: 5000
         });
 
         mqttClient.on('connect', () => {
           console.log('✅ MQTT Connected to:', brokerUrl);
+          updateCloudStatus('정상 연결', true);
           if (onReady) onReady();
         });
 
@@ -1583,7 +1601,7 @@
 
         mqttClient.on('error', (err) => {
           console.warn('MQTT error on ' + brokerUrl + ':', err);
-          // Auto switch to backup broker
+          updateCloudStatus('대체 서버 전환 중...', false);
           currentBrokerIdx = (currentBrokerIdx + 1) % MQTT_BROKERS.length;
         });
 
@@ -1592,6 +1610,7 @@
         });
       } catch (e) {
         console.error('MQTT connect error:', e);
+        updateCloudStatus('오류', false);
       }
     }
 
@@ -1836,18 +1855,19 @@
       const dot = document.getElementById('studentStatusDot');
       const text = document.getElementById('studentNetworkText');
       dot.className = 'status-dot';
-      text.textContent = '연결 시도 중...';
+      text.textContent = '1단계: 서버 연결 중...';
 
       if (studentJoinTimer) clearTimeout(studentJoinTimer);
       studentJoinTimer = setTimeout(() => {
         if (!isStudentConnected) {
           dot.className = 'status-dot';
-          text.textContent = '방을 찾을 수 없음 (PIN 확인)';
-          showToast(`❌ [PIN ${pin}] 선생님 방이 열려있지 않거나 번호가 다릅니다. 선생님 화면에 뜬 방 번호를 확인해주세요!`);
+          text.textContent = '선생님 방 미발견 (확인 필요)';
+          showToast(`❌ [PIN ${pin}] 방을 찾을 수 없습니다! 선생님 화면에 [교사용 모드]와 방 번호가 켜져 있는지 확인해주세요.`);
         }
-      }, 8000);
+      }, 7000);
 
       initMqttClient(() => {
+        text.textContent = `2단계: [방 ${pin}] 입장 요청 중...`;
         const hostTopic = `streams/v1/${pin}/host`;
         const privateTopic = `streams/v1/${pin}/student/${myStudentId}`;
 
