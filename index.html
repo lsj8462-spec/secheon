@@ -1,0 +1,2781 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>스트림스(STREAMS) - 교실용 실시간 보드게임</title>
+  
+  <!-- P2P 실시간 통신 및 QR코드 라이브러리 -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --sheet-bg: #c5ccd6;
+      --sheet-surface: #e9edf2;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --accent: #f59e0b;
+      --danger: #ef4444;
+      --success: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #0f172a;
+      color: var(--text);
+      touch-action: manipulation;
+      overflow-x: hidden;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 상단 헤더 */
+    header {
+      background: #1e293b;
+      color: white;
+      padding: 6px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+      border-bottom: 1px solid #334155;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-icon {
+      background: linear-gradient(135deg, #f59e0b, #ef4444);
+      color: white;
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 14px;
+    }
+
+    .brand-title {
+      font-size: 1.05rem;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      color: #f8fafc;
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-icon {
+      background: #334155;
+      border: 1px solid #475569;
+      color: #f8fafc;
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    /* 탭 바 */
+
+    /* 기본적으로 학생 화면에서는 교사용 탭 숨김 */
+    .tab-bar {
+      display: none; /* 교사 인증 시 flex 로 전환 */
+      justify-content: center;
+      background: #1e293b;
+      padding: 3px;
+      margin: 4px auto 6px;
+      border-radius: 8px;
+      width: calc(100% - 16px);
+      max-width: 540px;
+      gap: 4px;
+      flex-shrink: 0;
+      border: 1px solid #334155;
+    }
+    .tab-bar.show-teacher-tabs {
+      display: flex !important;
+    }
+
+
+    .tab-btn {
+      flex: 1;
+      padding: 6px 10px;
+      border: none;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 0.82rem;
+      font-weight: 700;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.15s;
+    }
+
+    .tab-btn.active {
+      background: #4f46e5;
+      color: white;
+      box-shadow: 0 2px 6px rgba(79, 70, 229, 0.4);
+    }
+
+    /* 메인 뷰포트 */
+    main {
+      flex: 1;
+      max-width: 1400px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0 8px 12px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tab-content {
+      display: none;
+      width: 100%;
+      height: 100%;
+    }
+    .tab-content.active {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    /* ============================================================ */
+    /* 1. 공식 스트림스 게임 보드 (ㄱ자형 쉐브론 트랙) */
+    /* ============================================================ */
+    .streams-sheet-card {
+      background: var(--sheet-bg);
+      border-radius: 14px;
+      padding: 8px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+      position: relative;
+      border: 2px solid #8492a6;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    /* 상단 실시간 접속 상태 및 입장 바 */
+    .sheet-top-controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      background: rgba(255, 255, 255, 0.7);
+      padding: 6px 12px;
+      border-radius: 8px;
+    }
+
+    .room-connect-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: #1e293b;
+      cursor: pointer;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #94a3b8;
+    }
+    .status-dot.online { background: #10b981; box-shadow: 0 0 6px #10b981; }
+
+    /* 방 입장 모달 / 패널 */
+    #studentJoinDropdown {
+      display: none;
+      background: white;
+      padding: 10px 14px;
+      border-radius: 10px;
+      margin-bottom: 6px;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    /* SVG 보드 래퍼 */
+    .board-svg-wrapper {
+      flex: 1;
+      width: 100%;
+      aspect-ratio: 800 / 534;
+      max-height: calc(100vh - 120px);
+      margin: 0 auto;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    svg.streams-board {
+      width: 100%;
+      height: 100%;
+      display: block;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.15));
+    }
+
+    /* SVG 내부 타일 스타일 */
+    .cell-path {
+      fill: #ffffff;
+      stroke: #7f8c9d;
+      stroke-width: 2.2;
+      cursor: pointer;
+      transition: fill 0.15s, stroke 0.15s;
+    }
+    .cell-path:hover:not(.filled) {
+      fill: #eef2ff;
+      stroke: #4f46e5;
+    }
+    .cell-path.filled {
+      fill: #fdfdfd;
+      stroke: #5a6677;
+    }
+
+    /* 스트림 하이라이트 색상 */
+    .group-col-0 { fill: #fecaca !important; stroke: #ef4444 !important; }
+    .group-col-1 { fill: #fef08a !important; stroke: #eab308 !important; }
+    .group-col-2 { fill: #bbf7d0 !important; stroke: #22c55e !important; }
+    .group-col-3 { fill: #c7d2fe !important; stroke: #6366f1 !important; }
+    .group-col-4 { fill: #e9d5ff !important; stroke: #a855f7 !important; }
+    .group-col-5 { fill: #fed7aa !important; stroke: #f97316 !important; }
+    .group-col-6 { fill: #99f6e4 !important; stroke: #14b8a6 !important; }
+
+    .cell-idx-text {
+      font-size: 11px;
+      font-weight: 800;
+      fill: #94a3b8;
+      pointer-events: none;
+    }
+    .cell-val-text {
+      font-size: 26px;
+      font-weight: 900;
+      fill: #0f172a;
+      text-anchor: middle;
+      dominant-baseline: central;
+      pointer-events: none;
+      font-family: Impact, -apple-system, sans-serif;
+    }
+    .cell-val-text.is-joker {
+      fill: #f59e0b;
+      font-size: 32px;
+    }
+
+    /* 시트 하단 조작 바 */
+    .board-footer-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 4px;
+      gap: 8px;
+    }
+    .btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .btn-primary { background: #4f46e5; color: white; }
+    .btn-secondary { background: #e2e8f0; color: #1e293b; }
+    .btn-danger { background: #fee2e2; color: #ef4444; border: 1px solid #fecaca; }
+
+    /* ============================================================ */
+    /* 2. 교사용 진행자 화면 */
+    /* ============================================================ */
+    .teacher-panel {
+      background: white;
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .teacher-room-card {
+      background: #f8fafc;
+      border-radius: 10px;
+      padding: 10px 14px;
+      border: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .pin-box {
+      font-size: 1.5rem;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: #4f46e5;
+      background: #eef2ff;
+      padding: 4px 12px;
+      border-radius: 8px;
+      border: 2px dashed #818cf8;
+    }
+    .qr-preview-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #qrcodeContainer {
+      width: 65px;
+      height: 65px;
+      background: white;
+      padding: 3px;
+      border-radius: 6px;
+      border: 1px solid #cbd5e1;
+    }
+
+    .host-screen {
+      background: linear-gradient(145deg, #1e1b4b, #312e81);
+      color: white;
+      border-radius: 14px;
+      padding: 20px 14px;
+      text-align: center;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+    }
+    .host-badge-turn {
+      display: inline-block;
+      background: rgba(255, 255, 255, 0.15);
+      padding: 3px 12px;
+      border-radius: 14px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .host-tile-display {
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 14px;
+      background: white;
+      color: #1e1b4b;
+      border-radius: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 60px;
+      font-weight: 900;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+      font-family: Impact, -apple-system, sans-serif;
+    }
+    .host-tile-display.is-joker {
+      color: #f59e0b;
+      border: 3px solid #f59e0b;
+    }
+    .btn-host-draw {
+      background: linear-gradient(135deg, #f59e0b, #ea580c);
+      color: white;
+      font-size: 1.1rem;
+      padding: 10px 24px;
+      border-radius: 10px;
+      font-weight: 800;
+      border: none;
+      cursor: pointer;
+    }
+
+    .students-chips-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .student-badge-item {
+      background: #f1f5f9;
+      color: #1e293b;
+      padding: 4px 10px;
+      border-radius: 14px;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+    .student-badge-item.submitted {
+      background: #dcfce7;
+      color: #166534;
+      border: 1px solid #86efac;
+    }
+
+    .drawn-chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      min-height: 36px;
+      align-items: center;
+    }
+    .chip {
+      background: #eef2ff;
+      color: #4f46e5;
+      border: 1px solid #c7d2fe;
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 0.9rem;
+    }
+    .chip.chip-joker { background: #fef3c7; color: #d97706; }
+    .chip.recent { background: #4f46e5; color: white; transform: scale(1.1); }
+
+    /* ============================================================ */
+    /* 3. 실시간 학급 랭킹판 */
+    /* ============================================================ */
+    .scoreboard-panel {
+      background: white;
+      border-radius: 14px;
+      padding: 16px;
+    }
+    .stats-summary-bar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .stat-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 8px;
+      text-align: center;
+    }
+    .stat-card-title { font-size: 0.7rem; font-weight: 700; color: #64748b; }
+    .stat-card-val { font-size: 1.2rem; font-weight: 900; color: #4f46e5; margin-top: 2px; }
+    .ranking-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0 4px;
+    }
+    .ranking-table th { padding: 6px 10px; text-align: left; font-size: 0.78rem; color: #64748b; font-weight: 700; }
+    .ranking-row { background: #f8fafc; border-radius: 6px; }
+    .ranking-row td { padding: 8px 10px; font-size: 0.85rem; font-weight: 600; }
+    .rank-medal {
+      display: inline-block;
+      width: 22px;
+      height: 22px;
+      line-height: 22px;
+      text-align: center;
+      border-radius: 50%;
+      font-weight: 800;
+      font-size: 0.78rem;
+    }
+    .rank-1 .rank-medal { background: #fef08a; color: #854d0e; }
+    .rank-2 .rank-medal { background: #e2e8f0; color: #475569; }
+    .rank-3 .rank-medal { background: #fed7aa; color: #9a3412; }
+
+    /* 모달 */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 14px;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-card {
+      background: white;
+      border-radius: 18px;
+      max-width: 440px;
+      width: 100%;
+      max-height: 88vh;
+      overflow-y: auto;
+      padding: 20px 16px;
+      position: relative;
+    }
+    .modal-close {
+      position: absolute;
+      top: 14px; right: 14px;
+      background: #f1f5f9;
+      border: none;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .toast-msg {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #1e293b;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 24px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      z-index: 200;
+      transition: transform 0.25s;
+    }
+    .toast-msg.show { transform: translateX(-50%) translateY(0); }
+
+    #confettiCanvas {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 99;
+    }
+
+    /* ============================================================ */
+    /* 태블릿 및 가로모드(Landscape) 전용 풀스크린 최적화 */
+    /* ============================================================ */
+    /* 스크롤바 디자인 */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #94a3b8;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+
+    @media (orientation: landscape) and (min-height: 480px) {
+      body {
+        height: 100vh;
+        overflow: hidden;
+      }
+      header {
+        padding: 4px 12px;
+        height: 36px;
+      }
+      .tab-bar {
+        margin: 2px auto 4px;
+        padding: 2px;
+        height: 28px;
+        max-width: 480px;
+      }
+      .tab-btn {
+        padding: 3px 8px;
+        font-size: 0.76rem;
+      }
+      main {
+        max-width: 1400px;
+        padding: 0 8px 4px;
+        height: calc(100vh - 72px);
+        overflow: hidden;
+        justify-content: center;
+      }
+      #leaderboardTab {
+        overflow-y: auto;
+        max-height: calc(100vh - 76px);
+      }
+      #teacherTab {
+        overflow-y: auto;
+        max-height: calc(100vh - 76px);
+      }
+      .streams-sheet-card {
+        padding: 4px 10px;
+        height: 100%;
+        max-height: calc(100vh - 76px);
+        justify-content: space-between;
+      }
+      .sheet-top-controls {
+        margin-bottom: 2px;
+        padding: 3px 8px;
+      }
+      .board-svg-wrapper {
+        flex: 1;
+        width: 100%;
+        height: calc(100vh - 140px);
+        max-height: calc(100vh - 140px);
+        max-width: calc((100vh - 140px) * (800 / 534));
+        margin: 0 auto;
+      }
+      svg.streams-board {
+        width: 100%;
+        height: 100%;
+        max-height: 100%;
+        object-fit: contain;
+      }
+      .board-footer-actions {
+        margin-top: 2px;
+        padding: 2px 0;
+      }
+      .board-footer-actions .btn {
+        padding: 4px 12px;
+        font-size: 0.78rem;
+      }
+    }
+
+    @media (orientation: landscape) and (max-height: 480px) {
+      header { display: none; }
+      .tab-bar { display: none; }
+      main { height: 100vh; padding: 2px; }
+      .streams-sheet-card { height: 100vh; max-height: 100vh; border-radius: 0; padding: 4px; }
+      .board-svg-wrapper {
+        height: calc(100vh - 40px);
+        max-height: calc(100vh - 40px);
+        max-width: calc((100vh - 40px) * (800 / 534));
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="confettiCanvas"></canvas>
+  <div class="toast-msg" id="toastBox">알림 메시지</div>
+
+  <!-- 상단 네비게이션 헤더 -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">★</div>
+      <div class="brand-title">STREAMS</div>
+    </div>
+    <div class="header-controls">
+
+      <button class="btn-icon" id="btnTeacherAuth" title="선생님 모드 전환" style="width: auto; padding: 0 10px; font-weight: 700; font-size: 0.8rem; gap: 4px; display: inline-flex;">
+        <span id="teacherAuthIcon">🔒</span> <span id="teacherAuthText">교사 인증</span>
+      </button>
+      <button class="btn-icon" id="btnFullscreen" title="화면 꽉 차게 보기">⛶</button>
+      <button class="btn-icon" id="btnSound" title="소리 켜기/끄기">🔊</button>
+    </div>
+  </header>
+
+  <!-- 탭 메뉴 -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="studentTab">📱 학생용 게임 시트</button>
+    <button class="tab-btn" data-tab="teacherTab">👨‍🏫 교사용 뽑기</button>
+    <button class="tab-btn" data-tab="leaderboardTab">🏆 실시간 랭킹</button>
+  </div>
+
+  <main>
+    <!-- ======================================================== -->
+    <!-- 1. 학생용 공식 시트 (ㄱ자 쉐브론 20칸 트랙) -->
+    <!-- ======================================================== -->
+    <div id="studentTab" class="tab-content active">
+      <div class="streams-sheet-card">
+        
+        <!-- 상단 바 (방 연결 상태) -->
+        <div class="sheet-top-controls">
+          <div style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 800; color: #334155;">
+            <span>🎲 스트림스 20칸 공식 시트</span>
+            <span style="background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; border: 1px solid #c7d2fe;" id="studentModeBadge">보통 모드</span>
+          </div>
+
+          <div class="room-connect-badge" id="studentRoomStatusBadge">
+            <span class="status-dot" id="studentStatusDot"></span>
+            <span id="studentNetworkText">선생님 방 입장하기 ▼</span>
+          </div>
+        </div>
+
+        <!-- 방 입장 패널 (학년, 반, 번호, 이름, PIN 모두 가로 한 줄 배치) -->
+        <div id="studentJoinDropdown" style="display: none; background: white; padding: 10px 12px; border-radius: 10px; margin-bottom: 6px; border: 1.5px solid #cbd5e1; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+          <div style="display: flex; gap: 6px; align-items: center; width: 100%; flex-wrap: nowrap;">
+            <input type="number" id="inputGrade" min="1" max="6" placeholder="학년" style="flex: 1 1 0; min-width: 0; padding: 6px 4px; border: 1.5px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; font-weight: 800; text-align: center; background: #f8fafc; outline: none; height: 36px; box-sizing: border-box;">
+            <input type="number" id="inputClass" min="1" max="25" placeholder="반" style="flex: 1 1 0; min-width: 0; padding: 6px 4px; border: 1.5px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; font-weight: 800; text-align: center; background: #f8fafc; outline: none; height: 36px; box-sizing: border-box;">
+            <input type="number" id="inputNumber" min="1" max="50" placeholder="번호" style="flex: 1 1 0; min-width: 0; padding: 6px 4px; border: 1.5px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; font-weight: 800; text-align: center; background: #f8fafc; outline: none; height: 36px; box-sizing: border-box;">
+            <input type="text" id="myStudentName" placeholder="이름" style="flex: 1 1 0; min-width: 0; padding: 6px 4px; border: 1.5px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; font-weight: 800; text-align: center; background: #ffffff; outline: none; height: 36px; box-sizing: border-box;">
+            <input type="text" id="targetRoomPin" placeholder="핀번호" maxlength="6" style="flex: 1 1 0; min-width: 0; padding: 6px 4px; border: 1.5px solid #818cf8; border-radius: 6px; font-size: 0.85rem; text-transform: uppercase; font-weight: 900; letter-spacing: 1px; text-align: center; background: #ffffff; outline: none; color: #4338ca; height: 36px; box-sizing: border-box;">
+            <button class="btn btn-primary" id="btnConnectRoom" style="font-size: 0.82rem; height: 36px; padding: 0 16px; white-space: nowrap; flex-shrink: 0; font-weight: 800;">입장하기</button>
+          </div>
+          <div id="nameFormatPreview" style="font-size: 0.72rem; color: #64748b; margin-top: 4px; text-align: right; font-weight: 600;">입장 형식: [학년][반][번호]_[이름] (예: 6507_홍길동)</div>
+        </div>
+
+        <!-- 인터랙티브 SVG 공식 보드판 -->
+        <div class="board-svg-wrapper">
+          <svg viewBox="0 0 800 534" class="streams-board" id="streamsSvgBoard">
+            <!-- 배경 시트 레이아웃 -->
+            <rect x="0" y="0" width="800" height="534" rx="16" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>
+            
+            <!-- STREAMS 로고 -->
+            <g transform="translate(470, 22)">
+              <text x="0" y="44" font-family="Impact, sans-serif" font-size="52" font-weight="900" fill="#ffffff" stroke="#475569" stroke-width="4" letter-spacing="1">STREAMS</text>
+              <text x="0" y="44" font-family="Impact, sans-serif" font-size="52" font-weight="900" fill="#ffffff" letter-spacing="1">STREAMS</text>
+              <text x="148" y="24" font-size="20" fill="#f59e0b" text-anchor="middle">★</text>
+              <text x="290" y="12" font-size="10" fill="#94a3b8" font-family="sans-serif">Yoshihisa Itsubaki</text>
+            </g>
+
+            <!-- 선생님이 방금 뽑은 타일 디스플레이 (단일 타일 강조 - 직접 뽑기 삭제됨) -->
+            <g transform="translate(460, 95)" id="currentTileBox">
+              <rect x="0" y="0" width="310" height="135" rx="14" fill="#ffffff" stroke="#818cf8" stroke-width="2" filter="drop-shadow(0 4px 8px rgba(0,0,0,0.06))"/>
+              <text x="14" y="26" font-size="13" font-weight="800" fill="#4f46e5">🎲 선생님이 방금 뽑은 숫자 타일</text>
+              <text x="14" y="44" font-size="11" font-weight="600" fill="#64748b" id="currentTileSubText">아래 20칸 트랙의 빈 곳을 터치해 배치하세요</text>
+              
+              <!-- 3D 스타일 타일 카드 -->
+              <g transform="translate(18, 52)">
+                <rect x="0" y="0" width="68" height="68" rx="12" fill="#1e1b4b" filter="drop-shadow(0 4px 10px rgba(0,0,0,0.3))"/>
+                <rect x="2" y="2" width="64" height="64" rx="10" fill="#ffffff" id="currentTileInner"/>
+                <text x="34" y="34" id="currentTileText" font-family="Impact, sans-serif" font-size="36" font-weight="900" fill="#0f172a" text-anchor="middle" dominant-baseline="central">-</text>
+              </g>
+
+              <g transform="translate(100, 68)">
+                <text x="0" y="12" font-size="14" font-weight="800" fill="#1e293b" id="currentTileStateText">선생님 뽑기 대기 중</text>
+                <text x="0" y="32" font-size="12" font-weight="700" fill="#6366f1" id="sheetProgressText">진행: 0 / 20칸</text>
+                <text x="0" y="48" font-size="10.5" font-weight="600" fill="#94a3b8" id="onlineLiveNotice">온라인 자동 동기화 모드</text>
+              </g>
+            </g>
+
+            <!-- 공식 점수표 2개 (좌측에 수직 배치) -->
+            <!-- 테이블 1 (1 ~ 10칸) -->
+            <g transform="translate(75, 80)" id="scoreTable1">
+              <rect x="0" y="0" width="94" height="340" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+              <line x1="47" y1="0" x2="47" y2="340" stroke="#64748b" stroke-width="1.5"/>
+              <line x1="0" y1="32" x2="94" y2="32" stroke="#64748b" stroke-width="2"/>
+              <text x="23" y="21" font-size="14" font-weight="900" fill="#1e293b" text-anchor="middle">≫</text>
+              <text x="70" y="22" font-size="16" font-weight="900" fill="#1e293b" text-anchor="middle">＋</text>
+              <g id="scoreRows1"></g>
+            </g>
+
+            <!-- 테이블 2 (11 ~ 20칸) -->
+            <g transform="translate(185, 80)" id="scoreTable2">
+              <rect x="0" y="0" width="94" height="340" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+              <line x1="47" y1="0" x2="47" y2="340" stroke="#64748b" stroke-width="1.5"/>
+              <line x1="0" y1="32" x2="94" y2="32" stroke="#64748b" stroke-width="2"/>
+              <text x="23" y="21" font-size="14" font-weight="900" fill="#1e293b" text-anchor="middle">≫</text>
+              <text x="70" y="22" font-size="16" font-weight="900" fill="#1e293b" text-anchor="middle">＋</text>
+              <g id="scoreRows2"></g>
+            </g>
+
+            <!-- 플레이어 정보 & 공식 타일 스펙 영역 -->
+            <g transform="translate(460, 245)">
+              <g transform="translate(0, 0)">
+                <circle cx="16" cy="14" r="8" fill="#64748b"/>
+                <path d="M 6 32 C 6 22 26 22 26 32 Z" fill="#64748b"/>
+                <line x1="36" y1="30" x2="300" y2="30" stroke="#64748b" stroke-width="2"/>
+                <text x="42" y="24" font-size="14" font-weight="800" fill="#1e293b" id="svgPlayerNameDisplay">학생: (미입장)</text>
+              </g>
+
+              <!-- 공식 타일 풀 스펙 요약 (사진 속 디자인) -->
+              <g transform="translate(0, 50)">
+                <text x="4" y="24" font-size="12" font-weight="800" fill="#64748b">↺ x20</text>
+                <text x="70" y="24" font-size="12" font-weight="800" fill="#64748b">▢ x40</text>
+
+                <g transform="translate(125, 6)">
+                  <rect x="0" y="0" width="34" height="22" rx="4" fill="#ffffff" stroke="#94a3b8"/>
+                  <text x="17" y="15" font-size="9" font-weight="900" fill="#334155" text-anchor="middle">1~10</text>
+
+                  <rect x="40" y="-4" width="22" height="15" rx="3" fill="#ffffff" stroke="#94a3b8"/>
+                  <text x="51" y="7" font-size="8" font-weight="900" fill="#334155" text-anchor="middle">11</text>
+                  <rect x="40" y="13" width="22" height="15" rx="3" fill="#ffffff" stroke="#94a3b8"/>
+                  <text x="51" y="24" font-size="8" font-weight="900" fill="#334155" text-anchor="middle">11</text>
+
+                  <text x="68" y="15" font-size="10" font-weight="900" fill="#64748b">~</text>
+
+                  <rect x="78" y="-4" width="22" height="15" rx="3" fill="#ffffff" stroke="#94a3b8"/>
+                  <text x="89" y="7" font-size="8" font-weight="900" fill="#334155" text-anchor="middle">19</text>
+                  <rect x="78" y="13" width="22" height="15" rx="3" fill="#ffffff" stroke="#94a3b8"/>
+                  <text x="89" y="24" font-size="8" font-weight="900" fill="#334155" text-anchor="middle">19</text>
+
+                  <rect x="108" y="0" width="38" height="22" rx="4" fill="#ffffff" stroke="#94a3b8"/>
+                  <text x="127" y="15" font-size="9" font-weight="900" fill="#334155" text-anchor="middle">20~30</text>
+
+                  <rect x="152" y="0" width="22" height="22" rx="4" fill="#ffffff" stroke="#94a3b8"/>
+                  <text x="163" y="15" font-size="12" fill="#f59e0b" text-anchor="middle">★</text>
+                </g>
+              </g>
+
+              <!-- 총점 계산란 -->
+              <g transform="translate(0, 105)">
+                <text x="8" y="26" font-size="28" font-weight="900" fill="#64748b">＋</text>
+                <line x1="36" y1="30" x2="300" y2="30" stroke="#64748b" stroke-width="2"/>
+                <text x="50" y="24" font-size="22" font-weight="900" fill="#4f46e5" id="svgTotalScoreDisplay"></text>
+              </g>
+
+              <!-- 점수 계산란 바로 아래 큼직한 직전 취소 버튼 -->
+              <g transform="translate(0, 142)" id="svgBtnLargeUndo" style="cursor: pointer;">
+                <rect x="0" y="0" width="300" height="46" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2" filter="drop-shadow(0 2px 5px rgba(0,0,0,0.12))"/>
+                <text x="150" y="24" font-size="15" font-weight="900" fill="#1e293b" text-anchor="middle" dominant-baseline="central">↩ 직전 배치 취소 (되돌리기)</text>
+              </g>
+            </g>
+
+            <!-- 쉐브론 트랙 셀 그룹 (사진 속 ㄱ자 20칸 트랙) -->
+            <g id="svgTrackGroup"></g>
+          </svg>
+        </div>
+
+        <!-- 하단 조작 바 -->
+        <div class="board-footer-actions">
+          
+          <button class="btn btn-danger" id="btnResetSheet">🔄 초기화</button>
+          <button class="btn btn-primary" id="btnShowMyScore" style="display: none;">🎉 결과 점수 보기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- 2. 교사용 진행자 탭 -->
+    <!-- ======================================================== -->
+    <div id="teacherTab" class="tab-content">
+      <div class="teacher-panel">
+        <div class="teacher-room-card">
+          <div>
+            <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted);">우리반 실시간 방 번호</div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+              <div class="pin-box" id="teacherRoomPin">----</div>
+              <button class="btn btn-secondary" id="btnChangePin" style="font-size: 0.75rem; padding: 4px 8px;" title="방 번호 직접 변경">✏️ 변경</button>
+              <button class="btn btn-secondary" id="btnCopyInviteLink" style="font-size: 0.8rem; padding: 6px 10px;">🔗 링크 복사</button>
+            </div>
+          </div>
+          <div class="qr-preview-box">
+            <div style="position: relative; cursor: pointer;" id="btnOpenQrZoom" title="클릭하면 대형 화면으로 확대됩니다">
+              <img src="data:image/png;base64,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MQFEPBsFiPSnmBISI59qm6ibq7p5vtbV88wV7DJzrv5o8d2oxMin2ibq5qpunq919TxzBbvMnKt/srWMSox8qm2ibq7q5vlaV88zV7DLzLm64NkoQEQZBYgoowCRrWVUYuRTbRN1c1U3z9e6ep65gl1mztWFxXejEiOfapuom6u6eb7W1fPMFewyc67+iRQTQMSzUYDI7hTTtaclkTaeb6LrfJNRdbXtWqM6Ukx3eFoSaeP5JrrONxlVV9uuNaojxXSHpyWRNp5vout8k1F1te1aozpSTACnUUYBIsooQOTMMvq0JNLG8010nW8yqq62XWtUR4rpPk9LIm0830TX+Saj6mrbtUZ1pJgAjuLZKEBkeoppZjJn5qfXNs5G3aiSnutGlRy3a1Qbr4WPG303OjOZM/PHaxtno25USc91o0qO2zWqjddChblltCupUnfcmWeUtN24RknPdaNKjts1qo3XQhHPRgEiyihARBkFiMwtozOTOTM/vbZxNupGlfRcN6rkuF2j2ngtFBl9N9qVVKk77swzStpuXKOk57pRJcftGtXGa6GCFBNAxLNRgMjuFFNd25muz+i8851p5jzXjcq++leLU0x1bWe6PqPzznemmfNcNyr76hVbU0x1bWdal+s40sx57kpA8ZtnowARZRQgoowCRLammOraznR9Rued70wz57luVPbVixanmOrazrQr13GqmfPclYDiFykmgIhnowCR/hRTkszpyjh1jTkZVV3bO1W/tLjl3O8c58wrdNSObb4bTZI5XRmnrjEno6pryz261mjmFTptx3aW0a7vY6lrWzfmZFR1bblH1xrNvEJ9FxPAaab/PzzBnTcaW54RM4q7UYBIZxlNkjldGaeuMSejqmvLPbrWaOYVOnDHNt+Ndn0fS13bujEno6pryz261mjmFeq7mOB7/unZ6NetW/H81KXBizwbBYhIMb3TNlF3vnVzxVdPy6F17SsppldtTDEl6s63bq74qm4mZ+7nrn21az93Phu9fuaVfJoct07d+dbN1QRdF8n1HdD1//K7Zu7nrn21bj97NgoQUUYBIsooQESK6XttE3XnWzdXfFU3kzP3c9e+kmL6no0ppkTd+dbNFV/VzeTM/dy1r6SY4JPm/KUe/sizUYDIc///Rjemp+rajsqEDLdxJs/LR0kx9duYnqprOy0TMtnGmTwvHzVt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" id="teacherQrImg" alt="학생 입장 QR" style="width: 68px; height: 68px; border-radius: 8px; background: white; padding: 3px; border: 1.5px solid #cbd5e1; object-fit: contain; box-shadow: 0 2px 6px rgba(0,0,0,0.08); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='scale(1)'">
+              <div style="position: absolute; bottom: 2px; right: 2px; background: rgba(0,0,0,0.65); color: white; border-radius: 4px; padding: 1px 4px; font-size: 9px; font-weight: 800; pointer-events: none;">🔍 클릭 확대</div>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted);">
+              <strong>학생 입장 안내</strong><br>
+              <span style="color: #4f46e5; font-weight: 700; cursor: pointer;" id="btnQrTextZoom">QR코드를 클릭</span>하면 교실 화면에<br>
+              <strong>대형 크기로 확대</strong>됩니다!
+            </div>
+          </div>
+        </div>
+
+        <div class="host-screen">
+          <div class="host-badge-turn" id="hostTurnBadge">타일 뽑기 준비 (총 20개 중 0개)</div>
+          <div class="host-tile-display" id="hostBigTile">?</div>
+          <div style="display: flex; justify-content: center; gap: 10px; margin-bottom: 10px;">
+            <button class="btn-host-draw" id="btnHostDraw">🎲 다음 타일 뽑기 (Space)</button>
+            <button class="btn btn-secondary" id="btnHostReset" style="background: rgba(255,255,255,0.2); color: white; border: none; border-radius: 12px; padding: 0 16px;">새 게임</button>
+          </div>
+
+          <!-- 보통 모드 / 상급 모드 선택 스위치 -->
+          <div style="background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 10px; display: inline-flex; align-items: center; gap: 10px; border: 1px solid rgba(255,255,255,0.15);">
+            <span style="font-size: 0.8rem; font-weight: 800; color: rgba(255,255,255,0.9);">규칙 선택:</span>
+            <div style="display: flex; gap: 4px; background: rgba(0,0,0,0.25); padding: 2px; border-radius: 8px;">
+              <button id="btnModeNormal" style="border: none; background: #4f46e5; color: white; padding: 5px 12px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; cursor: pointer;">보통 모드</button>
+              <button id="btnModeExpert" style="border: none; background: transparent; color: #cbd5e1; padding: 5px 12px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; cursor: pointer;">상급 모드 (함정 룰 🔥)</button>
+            </div>
+          </div>
+          <div id="teacherModeGuide" style="font-size: 0.74rem; color: #94a3b8; margin-top: 6px;">
+            일반 점수 적용: 6칸(+9점), 12칸(+35점), 17칸(+85점)
+          </div>
+          <div style="margin-top: 8px; display: flex; justify-content: center; gap: 16px; align-items: center; flex-wrap: wrap;">
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: rgba(255,255,255,0.9); font-weight: 700;">
+              <input type="checkbox" id="ttsToggle" checked style="width: 16px; height: 16px;">
+              <span>한국어 음성 방송 (TTS)</span>
+            </label>
+          </div>
+
+          <!-- 진행 방식: 수동 넘김 vs 자동 넘김 (~초 입력) -->
+          <div style="margin-top: 10px; background: rgba(0,0,0,0.35); padding: 8px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;">
+            <span style="font-size: 0.8rem; font-weight: 800; color: rgba(255,255,255,0.9);">⏱️ 진행 방식:</span>
+            
+            <div style="display: flex; gap: 4px; background: rgba(0,0,0,0.3); padding: 2px; border-radius: 8px;">
+              <button id="btnModeManual" type="button" onclick="setTimerMode(false)" style="border: none; background: #4f46e5; color: white; padding: 5px 12px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; cursor: pointer;">수동 넘김</button>
+              <button id="btnModeAuto" type="button" onclick="setTimerMode(true)" style="border: none; background: transparent; color: #cbd5e1; padding: 5px 12px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; cursor: pointer;">자동 넘김</button>
+            </div>
+
+            <!-- 자동 넘김 선택 시 나타나는 초 입력창 & 시작/정지 버튼 -->
+            <div id="autoInputGroup" style="display: none; align-items: center; gap: 6px;">
+              <div style="display: flex; align-items: center; background: white; border-radius: 8px; padding: 2px 8px; border: 1.5px solid #818cf8;">
+                <input type="number" id="customSecondsInput" value="5" min="2" max="60" style="width: 44px; border: none; text-align: center; font-weight: 900; font-size: 0.9rem; color: #1e1b4b; outline: none;">
+                <span style="font-size: 0.78rem; font-weight: 800; color: #4338ca;">초</span>
+              </div>
+              <button id="btnAutoDrawToggle" type="button" onclick="toggleAutoDrawAction()" style="background: #10b981; color: white; border: none; padding: 6px 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; cursor: pointer;">
+                <span id="autoDrawToggleText">▶ 자동 시작</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 자동 타이머 카운트다운 막대바 -->
+          <div id="autoTimerBarWrapper" style="display: none; width: 100%; max-width: 320px; margin: 8px auto 0; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 4px 8px; border: 1px solid rgba(255,255,255,0.12);">
+            <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #cbd5e1; margin-bottom: 3px;">
+              <span>다음 타일까지 카운트다운</span>
+              <strong id="timerRemainSeconds" style="color: #f59e0b;">5.0초</strong>
+            </div>
+            <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.2); border-radius: 3px; overflow: hidden;">
+              <div id="autoTimerProgressBar" style="width: 100%; height: 100%; background: linear-gradient(90deg, #10b981, #f59e0b); transition: width 0.1s linear;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="connected-students-box" style="background: #f8fafc; border-radius: 12px; padding: 12px; border: 1px solid #e2e8f0;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h4 style="font-size: 0.85rem; font-weight: 800;">👥 현재 접속 학생 (<span id="connectedStudentCount">0</span>명)</h4>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">배치 완료 시 초록색으로 변경</span>
+          </div>
+          <div class="students-chips-list" id="studentsChipList">
+            <span style="color: var(--text-muted); font-size: 0.8rem;">아직 접속한 학생이 없습니다.</span>
+          </div>
+        </div>
+
+        <div class="history-card" style="background: #f8fafc; border-radius: 12px; padding: 12px; border: 1px solid #e2e8f0;">
+          <h4 style="font-size: 0.85rem; font-weight: 800; margin-bottom: 8px;">📋 지금까지 나온 타일 (<span id="historyCount">0</span>개)</h4>
+          <div class="drawn-chips" id="drawnHistoryChips">
+            <span style="color: var(--text-muted); font-size: 0.85rem;">아직 뽑힌 타일이 없습니다.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- 3. 실시간 학급 랭킹판 -->
+    <!-- ======================================================== -->
+    <div id="leaderboardTab" class="tab-content">
+      <div class="scoreboard-panel">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <div>
+            <h3 style="font-size: 1.1rem; font-weight: 900;">🏆 우리반 시상식 & 실시간 랭킹</h3>
+            <p style="font-size: 0.75rem; color: var(--text-muted);">학생들의 점수가 접수되면 랭킹 공개 버튼으로 흥미진진하게 시상식을 진행하세요!</p>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button class="btn btn-primary" id="btnCeremonyControl" style="font-size: 0.85rem; padding: 7px 16px; font-weight: 900; background: linear-gradient(135deg, #f59e0b, #ea580c); box-shadow: 0 4px 10px rgba(245, 158, 11, 0.4);">
+              🎉 랭킹 공개 시작하기 (꼴찌~4위)
+            </button>
+            <button class="btn btn-secondary" id="btnRevealAllDirectly" style="font-size: 0.75rem; padding: 7px 10px;">전체 바로보기</button>
+            <button class="btn btn-danger" id="btnResetBoard" style="font-size: 0.75rem; padding: 7px 10px;">초기화</button>
+          </div>
+        </div>
+
+        <div class="stats-summary-bar">
+          <div class="stat-card">
+            <div class="stat-card-title">제출 완료</div>
+            <div class="stat-card-val"><span id="statSubmittedCount">0</span>명</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-title">최고 점수</div>
+            <div class="stat-card-val"><span id="statTopScore">0</span>점</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-title">평균 점수</div>
+            <div class="stat-card-val"><span id="statAvgScore">0</span>점</div>
+          </div>
+        </div>
+
+        <div class="ranking-scroll-container" style="max-height: calc(100vh - 220px); min-height: 260px; overflow-y: auto; border: 1.5px solid #cbd5e1; border-radius: 10px; background: white; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);">
+          <table class="ranking-table" style="margin: 0; width: 100%;">
+            <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 10; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+              <tr>
+                <th style="width: 60px; padding: 10px 12px;">순위</th>
+                <th style="padding: 10px 12px;">학번_이름</th>
+                <th style="text-align: right; width: 100px; padding: 10px 12px;">점수</th>
+                <th style="text-align: right; width: 60px; padding: 10px 12px;">상태</th>
+              </tr>
+            </thead>
+            <tbody id="rankingTableBody">
+              <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">아직 제출된 학생 점수가 없습니다.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 점수 결과 팝업 모달 -->
+  <div class="modal-overlay" id="scoreModal">
+    <div class="modal-card">
+      <button class="modal-close" id="btnCloseModal">✕</button>
+      <div style="background: linear-gradient(135deg, #4f46e5, #06b6d4); color: white; border-radius: 14px; padding: 18px; text-align: center; margin-bottom: 16px;">
+        <h2 style="font-size: 0.95rem;">🎉 나의 최종 스트림스 점수</h2>
+        <div style="font-size: 3rem; font-weight: 900; margin: 6px 0;" id="modalFinalScore">0</div>
+        <div style="background: rgba(255, 255, 255, 0.2); border-radius: 8px; padding: 4px 10px; font-size: 0.8rem; font-weight: 700; display: inline-block;" id="modalSubmitStatus">선생님 화면으로 전송 중...</div>
+        <p id="modalJokerNotice" style="font-size: 0.8rem; opacity: 0.95; margin-top: 6px;"></p>
+      </div>
+
+      <h4 style="margin-bottom: 8px; font-weight: 800; font-size: 0.9rem;">연속 오름차순 구간 분석</h4>
+      <div id="modalBreakdownList" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;"></div>
+
+      <div style="text-align: center;">
+        <button class="btn btn-primary" id="btnCopyResult" style="width: 100%;">📋 내 점수 복사하기</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 구글 사이트 도구 등 iframe 보안 환경에서도 안전한 메모리/스토리지 헬퍼
+    const safeStorage = {
+      getItem: (key) => {
+        try {
+          return (typeof sessionStorage !== 'undefined' && sessionStorage) ? sessionStorage.getItem(key) : null;
+        } catch (e) {
+          return null; // iframe 보안 오류 시 안전하게 null 반환
+        }
+      },
+      setItem: (key, val) => {
+        try {
+          if (typeof sessionStorage !== 'undefined' && sessionStorage) sessionStorage.setItem(key, val);
+        } catch (e) {}
+      }
+    };
+
+    class SoundManager {
+      constructor() { this.ctx = null; this.enabled = true; }
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) this.ctx = new AudioContext();
+        }
+      }
+      playTone(freq, type = 'sine', duration = 0.1, gainVal = 0.1) {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        try {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+          gain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + duration);
+        } catch (e) {}
+      }
+      playPop() { this.playTone(520, 'sine', 0.08, 0.12); }
+      playDraw() {
+        if (!this.enabled) return;
+        this.playTone(440, 'triangle', 0.1, 0.1);
+        setTimeout(() => this.playTone(880, 'sine', 0.15, 0.12), 80);
+      }
+      playFanfare() {
+        if (!this.enabled) return;
+        const notes = [523.25, 659.25, 783.99, 1046.50];
+        notes.forEach((freq, idx) => {
+          setTimeout(() => this.playTone(freq, 'triangle', 0.25, 0.15), idx * 100);
+        });
+      }
+    }
+    const sound = new SoundManager();
+
+    function showToast(msg) {
+      const toast = document.getElementById('toastBox');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2500);
+    }
+
+    const SCORE_TABLE_NORMAL = {
+      1: 0, 2: 1, 3: 3, 4: 5, 5: 7, 6: 9, 7: 11, 8: 15, 9: 20, 10: 25,
+      11: 30, 12: 35, 13: 40, 14: 50, 15: 60, 16: 70, 17: 85, 18: 100, 19: 150, 20: 300
+    };
+
+    const SCORE_TABLE_EXPERT = {
+      1: 0, 2: 1, 3: 3, 4: 5, 5: 7, 6: 3, 7: 11, 8: 15, 9: 20, 10: 25,
+      11: 30, 12: 20, 13: 40, 14: 50, 15: 60, 16: 70, 17: 50, 18: 100, 19: 150, 20: 300
+    };
+
+    let currentGameMode = 'normal'; // 'normal' (보통) 또는 'expert' (상급자 함정 룰)
+
+    const maxCells = 20; // 20칸 공식 규격 고정
+    let studentBoard = Array(maxCells).fill(null);
+    let currentDrawnNumber = null;
+    let placementHistory = [];
+
+    /* ========================================================== */
+    /* 공식 점수표 및 ㄱ자형 20칸 쉐브론 트랙 렌더링 */
+    /* ========================================================== */
+    function renderScoreTableRows() {
+      const g1 = document.getElementById('scoreRows1');
+      const g2 = document.getElementById('scoreRows2');
+      g1.innerHTML = '';
+      g2.innerHTML = '';
+
+      const hRow = 30.8;
+      for (let i = 1; i <= 10; i++) {
+        const y = 32 + (i - 1) * hRow;
+        const line = `<line x1="0" y1="${y}" x2="94" y2="${y}" stroke="#cbd5e1" stroke-width="1"/>`;
+        const score = (i === 6) ? '+9' : (i === 1 ? '0' : `+${SCORE_TABLE_NORMAL[i]}`);
+        
+        let textPart = `<text x="70" y="${y + 20}" font-size="13" font-weight="900" fill="#1e293b" text-anchor="middle">${score}</text>`;
+        if (i === 6) {
+          const isExp = (currentGameMode === 'expert');
+          textPart = `
+            <polygon points="47,${y} 94,${y} 94,${y+hRow}" fill="${isExp ? '#fed7aa' : '#e2e8f0'}"/>
+            <text x="60" y="${y + 14}" font-size="10" font-weight="${isExp ? '600' : '900'}" fill="${isExp ? '#94a3b8' : '#1e293b'}" text-anchor="middle">+9</text>
+            <text x="82" y="${y + 26}" font-size="${isExp ? '11' : '9'}" font-weight="${isExp ? '900' : '800'}" fill="${isExp ? '#ea580c' : '#64748b'}" text-anchor="middle">+3</text>
+          `;
+        }
+
+        g1.innerHTML += `
+          ${line}
+          <text x="23" y="${y + 20}" font-size="14" font-weight="800" fill="#475569" text-anchor="middle">${i}</text>
+          ${textPart}
+        `;
+      }
+
+      for (let i = 11; i <= 20; i++) {
+        const y = 32 + (i - 11) * hRow;
+        const line = `<line x1="0" y1="${y}" x2="94" y2="${y}" stroke="#cbd5e1" stroke-width="1"/>`;
+        let textPart = `<text x="70" y="${y + 20}" font-size="13" font-weight="900" fill="#1e293b" text-anchor="middle">+${SCORE_TABLE_NORMAL[i]}</text>`;
+        
+        if (i === 12) {
+          const isExp = (currentGameMode === 'expert');
+          textPart = `
+            <polygon points="47,${y} 94,${y} 94,${y+hRow}" fill="${isExp ? '#fed7aa' : '#e2e8f0'}"/>
+            <text x="60" y="${y + 14}" font-size="10" font-weight="${isExp ? '600' : '900'}" fill="${isExp ? '#94a3b8' : '#1e293b'}" text-anchor="middle">+35</text>
+            <text x="82" y="${y + 26}" font-size="${isExp ? '11' : '9'}" font-weight="${isExp ? '900' : '800'}" fill="${isExp ? '#ea580c' : '#64748b'}" text-anchor="middle">+20</text>
+          `;
+        } else if (i === 17) {
+          const isExp = (currentGameMode === 'expert');
+          textPart = `
+            <polygon points="47,${y} 94,${y} 94,${y+hRow}" fill="${isExp ? '#fed7aa' : '#e2e8f0'}"/>
+            <text x="60" y="${y + 14}" font-size="10" font-weight="${isExp ? '600' : '900'}" fill="${isExp ? '#94a3b8' : '#1e293b'}" text-anchor="middle">+85</text>
+            <text x="82" y="${y + 26}" font-size="${isExp ? '11' : '9'}" font-weight="${isExp ? '900' : '800'}" fill="${isExp ? '#ea580c' : '#64748b'}" text-anchor="middle">+50</text>
+          `;
+        }
+
+        g2.innerHTML += `
+          ${line}
+          <text x="23" y="${y + 20}" font-size="14" font-weight="800" fill="#475569" text-anchor="middle">${i}</text>
+          ${textPart}
+        `;
+      }
+    }
+
+    function generateChevronCells() {
+      const cells = [];
+      const y_top = 18;
+      const h = 50;
+      const w = 53;
+      const d = 12;
+
+      // 1. Cell 1: 라운드 시작 캡
+      cells.push({
+        idx: 1,
+        d: `M 32 ${y_top} L 74 ${y_top} L ${74+d} ${y_top+h/2} L 74 ${y_top+h} L 32 ${y_top+h} A 10 10 0 0 1 22 ${y_top+h-10} L 22 ${y_top+10} A 10 10 0 0 1 32 ${y_top} Z`,
+        cx: 48, cy: y_top + h/2
+      });
+
+      // 2. Cells 2..6: 상단 가로 쉐브론 우측 방향
+      for (let i = 2; i <= 6; i++) {
+        const x = 74 + (i - 2) * w;
+        cells.push({
+          idx: i,
+          d: `M ${x} ${y_top} L ${x+w} ${y_top} L ${x+w+d} ${y_top+h/2} L ${x+w} ${y_top+h} L ${x} ${y_top+h} L ${x+d} ${y_top+h/2} Z`,
+          cx: x + w/2 + d/2, cy: y_top + h/2
+        });
+      }
+
+      // 3. Cell 7: 우상단 모서리
+      const x7 = 74 + 5 * w;
+      const w_corner = 65;
+      const h_corner = 65;
+      cells.push({
+        idx: 7,
+        d: `M ${x7} ${y_top} L ${x7+w_corner} ${y_top} L ${x7+w_corner} ${y_top+h_corner} L ${x7+w_corner/2} ${y_top+h_corner+d} L ${x7} ${y_top+h_corner} L ${x7+d} ${y_top+h/2} Z`,
+        cx: x7 + w_corner/2, cy: y_top + h_corner/2 - 2
+      });
+
+      // 4. Cells 8..13: 수직 하강 쉐브론
+      const x_col = x7;
+      const w_col = w_corner;
+      const h_vert = 58;
+      const y_start = y_top + h_corner;
+      for (let i = 8; i <= 13; i++) {
+        const y = y_start + (i - 8) * h_vert;
+        cells.push({
+          idx: i,
+          d: `M ${x_col} ${y} L ${x_col+w_col/2} ${y+d} L ${x_col+w_col} ${y} L ${x_col+w_col} ${y+h_vert} L ${x_col+w_col/2} ${y+h_vert+d} L ${x_col} ${y+h_vert} Z`,
+          cx: x_col + w_col/2, cy: y + h_vert/2 + d/2
+        });
+      }
+
+      // 5. Cell 14: 우하단 모서리
+      const y14 = y_start + 6 * h_vert;
+      cells.push({
+        idx: 14,
+        d: `M ${x_col} ${y14} L ${x_col+w_col/2} ${y14+d} L ${x_col+w_col} ${y14} L ${x_col+w_col+d} ${y14+h_corner/2} L ${x_col+w_col} ${y14+h_corner} L ${x_col} ${y14+h_corner} Z`,
+        cx: x_col + w_col/2, cy: y14 + h_corner/2
+      });
+
+      // 6. Cells 15..19: 하단 가로 쉐브론 우측 방향
+      const x_bot_start = x_col + w_col;
+      const y_bot = y14 + (h_corner - h);
+      const w_bot = 56;
+      for (let i = 15; i <= 19; i++) {
+        const x = x_bot_start + (i - 15) * w_bot;
+        cells.push({
+          idx: i,
+          d: `M ${x} ${y_bot} L ${x+w_bot} ${y_bot} L ${x+w_bot+d} ${y_bot+h/2} L ${x+w_bot} ${y_bot+h} L ${x} ${y_bot+h} L ${x+d} ${y_bot+h/2} Z`,
+          cx: x + w_bot/2 + d/2, cy: y_bot + h/2
+        });
+      }
+
+      // 7. Cell 20: 라운드 종료 캡
+      const x20 = x_bot_start + 5 * w_bot;
+      cells.push({
+        idx: 20,
+        d: `M ${x20} ${y_bot} L ${x20+w_bot-10} ${y_bot} A 10 10 0 0 1 ${x20+w_bot} ${y_bot+10} L ${x20+w_bot} ${y_bot+h-10} A 10 10 0 0 1 ${x20+w_bot-10} ${y_bot+h} L ${x20} ${y_bot+h} L ${x20+d} ${y_bot+h/2} Z`,
+        cx: x20 + w_bot/2, cy: y_bot + h/2
+      });
+
+      return cells;
+    }
+
+    function renderSvgTrack() {
+      const g = document.getElementById('svgTrackGroup');
+      g.innerHTML = '';
+      const cellDefs = generateChevronCells();
+
+      cellDefs.forEach(cell => {
+        const cellG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        cellG.setAttribute('class', 'track-cell-group');
+        cellG.setAttribute('data-idx', cell.idx - 1);
+        cellG.style.cursor = 'pointer';
+        cellG.onclick = () => onSvgCellClick(cell.idx - 1);
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', cell.d);
+        path.setAttribute('class', 'cell-path');
+        path.setAttribute('id', `svg-cell-path-${cell.idx - 1}`);
+
+        const idxText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        idxText.setAttribute('x', cell.cx - 16);
+        idxText.setAttribute('y', cell.cy - 12);
+        idxText.setAttribute('class', 'cell-idx-text');
+        idxText.textContent = cell.idx;
+
+        const valText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        valText.setAttribute('x', cell.cx);
+        valText.setAttribute('y', cell.cy + 2);
+        valText.setAttribute('class', 'cell-val-text');
+        valText.setAttribute('id', `svg-cell-val-${cell.idx - 1}`);
+
+        cellG.appendChild(path);
+        cellG.appendChild(idxText);
+        cellG.appendChild(valText);
+        g.appendChild(cellG);
+      });
+    }
+
+    /* 타일 클릭하여 배치 */
+    function onSvgCellClick(idx) {
+      if (currentDrawnNumber === null) {
+        showToast('선생님이 타일을 뽑을 때까지 잠시 기다려주세요!');
+        return;
+      }
+      if (studentBoard[idx] !== null) {
+        showToast('이미 숫자가 채워진 칸입니다! 다른 빈 칸을 터치하세요.');
+        return;
+      }
+
+      sound.playPop();
+      studentBoard[idx] = currentDrawnNumber;
+      placementHistory.push({ index: idx, val: currentDrawnNumber });
+
+      // SVG 셀 그래픽 갱신
+      const pathEl = document.getElementById(`svg-cell-path-${idx}`);
+      const valEl = document.getElementById(`svg-cell-val-${idx}`);
+      pathEl.classList.add('filled');
+      valEl.textContent = currentDrawnNumber;
+      if (currentDrawnNumber === '★') valEl.classList.add('is-joker');
+
+      // 방금 뽑은 타일 배치 완료 처리 -> 다음 타일 대기 상태로 변경
+      currentDrawnNumber = null;
+      document.getElementById('currentTileText').textContent = '-';
+      document.getElementById('currentTileText').style.fill = '#0f172a';
+      document.getElementById('currentTileStateText').textContent = '다음 타일 대기 중...';
+      document.getElementById('currentTileSubText').textContent = '선생님이 다음 타일을 뽑을 때까지 기다려주세요.';
+      document.getElementById('currentTileInner').setAttribute('fill', '#ffffff');
+
+      updateProgress();
+    }
+
+    function updateProgress() {
+      const placed = studentBoard.filter(v => v !== null).length;
+      document.getElementById('sheetProgressText').textContent = `진행: ${placed} / 20칸`;
+
+      if (placed === 20) {
+        document.getElementById('btnShowMyScore').style.display = 'inline-flex';
+        document.getElementById('currentTileStateText').textContent = '🎉 20칸 배치 완료!';
+        document.getElementById('currentTileSubText').textContent = '점수가 선생님 화면으로 자동 전송되었습니다.';
+        sound.playFanfare();
+        triggerConfetti();
+        showResultModalAndAutoSubmit();
+      } else {
+        document.getElementById('btnShowMyScore').style.display = 'none';
+      }
+    }
+
+    function undoPlacement() {
+      if (placementHistory.length === 0) return;
+      const last = placementHistory.pop();
+      studentBoard[last.index] = null;
+
+      const pathEl = document.getElementById(`svg-cell-path-${last.index}`);
+      const valEl = document.getElementById(`svg-cell-val-${last.index}`);
+      pathEl.className.baseVal = 'cell-path';
+      valEl.textContent = '';
+      valEl.classList.remove('is-joker');
+
+      // 되돌린 숫자를 현재 배치할 타일로 복구
+      setDrawnNumber(last.val);
+      updateProgress();
+    }
+
+    function resetStudentSheet() {
+      /* confirm removed */
+      for (let i = 0; i < maxCells; i++) {
+        studentBoard[i] = null;
+        const pathEl = document.getElementById(`svg-cell-path-${i}`);
+        const valEl = document.getElementById(`svg-cell-val-${i}`);
+        if (pathEl) pathEl.className.baseVal = 'cell-path';
+        if (valEl) {
+          valEl.textContent = '';
+          valEl.classList.remove('is-joker');
+        }
+      }
+      placementHistory = [];
+      currentDrawnNumber = null;
+      document.getElementById('currentTileText').textContent = '-';
+      document.getElementById('currentTileStateText').textContent = '선생님 뽑기 대기 중';
+      document.getElementById('currentTileSubText').textContent = '선생님이 타일을 뽑으면 번호가 자동으로 뜹니다.';
+      document.getElementById('svgTotalScoreDisplay').textContent = '';
+      updateProgress();
+    }
+
+    
+    /* 시간 초과 시 남은 빈 칸 중 무작위 자동 배치 함수 */
+    function autoPlacePendingNumber() {
+      if (currentDrawnNumber === null) return;
+
+      const emptyIndices = [];
+      for (let i = 0; i < maxCells; i++) {
+        if (studentBoard[i] === null) {
+          emptyIndices.push(i);
+        }
+      }
+      if (emptyIndices.length === 0) return;
+
+      const randIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+      const numToPlace = currentDrawnNumber;
+
+      studentBoard[randIdx] = numToPlace;
+      placementHistory.push({ index: randIdx, val: numToPlace, isAuto: true });
+
+      const pathEl = document.getElementById(`svg-cell-path-${randIdx}`);
+      const valEl = document.getElementById(`svg-cell-val-${randIdx}`);
+      if (pathEl) pathEl.classList.add('filled');
+      if (valEl) {
+        valEl.textContent = numToPlace;
+        if (numToPlace === '★') valEl.classList.add('is-joker');
+      }
+
+      sound.playPop();
+      showToast(`⏱️ 시간 초과! [${numToPlace === '★' ? '조커★' : numToPlace + '번'}] 타일이 ${randIdx + 1}번 칸에 자동 배치되었습니다.`);
+
+      currentDrawnNumber = null;
+      updateProgress();
+    }
+
+    function setDrawnNumber(val) {
+      currentDrawnNumber = val;
+      const tileText = document.getElementById('currentTileText');
+      const tileState = document.getElementById('currentTileStateText');
+      const tileSub = document.getElementById('currentTileSubText');
+      const tileInner = document.getElementById('currentTileInner');
+
+      tileText.textContent = val;
+      if (val === '★') {
+        tileText.style.fill = '#f59e0b';
+        tileInner.setAttribute('fill', '#fffbeb');
+        tileState.textContent = '★ 조커 뽑힘!';
+        tileSub.textContent = '20칸 중 원하는 빈 곳을 터치하세요.';
+      } else {
+        tileText.style.fill = '#0f172a';
+        tileInner.setAttribute('fill', '#ffffff');
+        tileState.textContent = `${val}번 뽑힘!`;
+        tileSub.textContent = '20칸 중 원하는 빈 곳을 터치하세요.';
+      }
+      sound.playDraw();
+    }
+
+    /* 점수 계산 */
+    function calculateStreamsScore(board) {
+      const jokerIndices = [];
+      board.forEach((val, i) => {
+        if (val === '★' || val === -1) jokerIndices.push(i);
+      });
+
+      const activeTable = (currentGameMode === 'expert') ? SCORE_TABLE_EXPERT : SCORE_TABLE_NORMAL;
+
+      function evalFixed(arr) {
+        const chains = [];
+        const ranges = [];
+        let curLen = 1;
+        let startIdx = 0;
+        for (let i = 0; i < arr.length - 1; i++) {
+          if (arr[i] <= arr[i + 1]) {
+            curLen++;
+          } else {
+            chains.push(curLen);
+            ranges.push({ start: startIdx, end: i, length: curLen });
+            curLen = 1;
+            startIdx = i + 1;
+          }
+        }
+        chains.push(curLen);
+        ranges.push({ start: startIdx, end: arr.length - 1, length: curLen });
+        const totalScore = chains.reduce((sum, len) => sum + (activeTable[len] || 0), 0);
+        return { totalScore, chains, ranges };
+      }
+
+      if (jokerIndices.length === 0) {
+        return { ...evalFixed(board), optimalJokerVal: null };
+      }
+
+      let bestScore = -1;
+      let bestResult = null;
+      let bestJokerVal = 0;
+
+      for (let cand = 0; cand <= 31; cand++) {
+        const testBoard = [...board];
+        jokerIndices.forEach(idx => testBoard[idx] = cand);
+        const res = evalFixed(testBoard);
+        if (res.totalScore > bestScore) {
+          bestScore = res.totalScore;
+          bestResult = res;
+          bestJokerVal = cand;
+        }
+      }
+      return { ...bestResult, optimalJokerVal: bestJokerVal };
+    }
+
+    function showResultModalAndAutoSubmit() {
+      const result = calculateStreamsScore(studentBoard);
+
+      document.getElementById('modalFinalScore').textContent = `${result.totalScore}점`;
+      document.getElementById('svgTotalScoreDisplay').textContent = `${result.totalScore}점`;
+
+      const jokerNotice = document.getElementById('modalJokerNotice');
+      if (result.optimalJokerVal !== null) {
+        jokerNotice.textContent = `★ 조커가 ${result.optimalJokerVal}(으)로 변신하여 최고 점수가 완성되었습니다!`;
+      } else {
+        jokerNotice.textContent = '';
+      }
+
+      const listEl = document.getElementById('modalBreakdownList');
+      listEl.innerHTML = '';
+
+      // 트랙 쉐브론 셀에 색상 하이라이트
+      result.ranges.forEach((range, groupIdx) => {
+        const colClass = `group-col-${groupIdx % 7}`;
+        const nums = [];
+        for (let i = range.start; i <= range.end; i++) {
+          const pathEl = document.getElementById(`svg-cell-path-${i}`);
+          if (pathEl) pathEl.className.baseVal = `cell-path filled ${colClass}`;
+          nums.push(studentBoard[i]);
+        }
+
+        const activeTable = (currentGameMode === 'expert') ? SCORE_TABLE_EXPERT : SCORE_TABLE_NORMAL;
+        const score = activeTable[range.length] || 0;
+        const isPenalty = (currentGameMode === 'expert') && (range.length === 6 || range.length === 12 || range.length === 17);
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:8px 12px; border-radius:8px; border-left:4px solid #4f46e5; font-size:0.85rem;';
+        item.innerHTML = `
+          <div>
+            <strong>구간 ${groupIdx + 1} (${range.length}칸 연속)</strong>
+            <span style="color:#64748b; font-size:0.75rem;">[ ${nums.join(', ')} ]</span>
+            ${isPenalty ? '<span style="color:#ef4444; font-size:0.7rem; font-weight:800; margin-left:4px;">⚠️상급자 함정 감점!</span>' : ''}
+          </div>
+          <strong style="color:${isPenalty ? '#ef4444' : '#4f46e5'}; font-size:1.05rem;">+${score}점</strong>
+        `;
+        listEl.appendChild(item);
+      });
+
+      const statusEl = document.getElementById('modalSubmitStatus');
+      const studentName = getFormattedStudentName() || '익명 학생';
+
+      if (studentConnToTeacher && studentConnToTeacher.open) {
+        studentConnToTeacher.send({
+          type: 'SUBMIT_SCORE',
+          name: studentName,
+          score: result.totalScore
+        });
+        statusEl.textContent = `✅ 선생님 화면으로 점수(${result.totalScore}점) 자동 전송 완료!`;
+        statusEl.style.background = '#10b981';
+      } else {
+        statusEl.textContent = 'ℹ️ 방 미연결 상태: 선생님께 점수를 알려주세요.';
+        statusEl.style.background = '#64748b';
+      }
+
+      document.getElementById('scoreModal').classList.add('active');
+    }
+
+    /* ========================================================== */
+    /* P2P 실시간 통신 (선생님 & 학생 온라인 전용 동기화) */
+    /* ========================================================== */
+    let teacherPeer = null;
+    let studentPeer = null;
+    let studentConnToTeacher = null;
+    let roomPin = '';
+    const connectedStudentsMap = new Map();
+
+    function generateRoomPin() {
+      return String(Math.floor(1000 + Math.random() * 9000));
+    }
+
+    function startTeacherRoom() {
+      if (typeof Peer === 'undefined') {
+        document.getElementById('teacherRoomPin').textContent = '오프라인';
+        return;
+      }
+      if (!roomPin) roomPin = generateRoomPin();
+      document.getElementById('teacherRoomPin').textContent = roomPin;
+
+      const peerId = `streams-room-${roomPin}`;
+      try {
+        teacherPeer = new Peer(peerId, {
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+          }
+        });
+
+        teacherPeer.on('open', () => renderRoomQRCode(roomPin));
+
+        teacherPeer.on('connection', (conn) => {
+          conn.on('data', (data) => handleTeacherReceivedData(conn, data));
+          conn.on('close', () => {
+            connectedStudentsMap.delete(conn.peer);
+            updateConnectedStudentsUI();
+          });
+        });
+
+        teacherPeer.on('error', (err) => {
+          if (err.type === 'unavailable-id') {
+            roomPin = generateRoomPin();
+            startTeacherRoom();
+          }
+        });
+      } catch (e) {}
+    }
+
+    function renderRoomQRCode(pin) {
+      const container = document.getElementById('qrcodeContainer'); if (!container) return; container.innerHTML = '';
+      if (typeof QRCode !== 'undefined') {
+        const fullUrl = window.location.origin + window.location.pathname + `?pin=${pin}`;
+        new QRCode(container, {
+          text: fullUrl,
+          width: 65, height: 65,
+          correctLevel: QRCode.CorrectLevel.M
+        });
+      }
+    }
+
+    function handleTeacherReceivedData(conn, data) {
+      if (data.type === 'JOIN') {
+        // 기존에 동일한 이름으로 접속된 이전 피어가 있다면 정리 (중복 표시 원천 차단)
+        for (const [peerId, entry] of connectedStudentsMap.entries()) {
+          if (entry.name === data.name && peerId !== conn.peer) {
+            try { entry.conn.close(); } catch(e) {}
+            connectedStudentsMap.delete(peerId);
+          }
+        }
+        connectedStudentsMap.set(conn.peer, { name: data.name, conn, score: null });
+        updateConnectedStudentsUI();
+        showToast(`🙋‍♂️ [${data.name}] 학생 입장!`);
+        conn.send({
+          type: 'SET_GAME_MODE',
+          gameMode: currentGameMode
+        });
+      } else if (data.type === 'SUBMIT_SCORE') {
+        const studentInfo = connectedStudentsMap.get(conn.peer) || { name: data.name };
+        studentInfo.score = data.score;
+        connectedStudentsMap.set(conn.peer, studentInfo);
+
+        addStudentScoreToLeaderboard(data.name, data.score);
+        updateConnectedStudentsUI();
+        sound.playFanfare();
+        showToast(`🎉 [${data.name}] ${data.score}점 자동 접수!`);
+      }
+    }
+
+    function kickStudent(peerId) {
+      const info = connectedStudentsMap.get(peerId);
+      if (!info) return;
+      const studentName = info.name;
+
+      if (info.conn && info.conn.open) {
+        try {
+          info.conn.send({
+            type: 'KICK',
+            reason: '⚠️ 닉네임 대신 본인 이름(예: 1번 김철수)으로 다시 입장해주세요!'
+          });
+          info.conn.close();
+        } catch (e) {}
+      }
+
+      connectedStudentsMap.delete(peerId);
+      classScores = classScores.filter(x => x.name !== studentName);
+      renderLeaderboard();
+      updateConnectedStudentsUI();
+      showToast(`⛔ [${studentName}] 학생을 퇴장 처리했습니다.`);
+    }
+
+    function updateConnectedStudentsUI() {
+      const listEl = document.getElementById('studentsChipList');
+      const countEl = document.getElementById('connectedStudentCount');
+
+      // 이름 기준 중복 제거 Map 생성
+      const uniqueStudentsMap = new Map();
+      connectedStudentsMap.forEach((info, peerId) => {
+        uniqueStudentsMap.set(info.name, { ...info, peerId });
+      });
+
+      countEl.textContent = uniqueStudentsMap.size;
+
+      if (uniqueStudentsMap.size === 0) {
+        listEl.innerHTML = '<span style="color: #64748b; font-size: 0.8rem;">아직 접속한 학생이 없습니다.</span>';
+        return;
+      }
+
+      listEl.innerHTML = '';
+      uniqueStudentsMap.forEach((info) => {
+        const badge = document.createElement('div');
+        const hasScore = info.score !== null;
+        badge.className = `student-badge-item ${hasScore ? 'submitted' : ''}`;
+        badge.innerHTML = `
+          <span>${hasScore ? '✅' : '🟢'}</span>
+          <span>${escapeHtml(info.name)}</span>
+          ${hasScore ? `<strong>(${info.score}점)</strong>` : ''}
+          <button class="btn-kick-chip" data-peer="${info.peerId}" title="퇴장 처리 (이름 다시 쓰게 하기)" style="background: #fee2e2; border: 1px solid #fca5a5; color: #dc2626; border-radius: 50%; width: 18px; height: 18px; line-height: 14px; font-size: 10px; font-weight: 900; margin-left: 6px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;">✕</button>
+        `;
+        listEl.appendChild(badge);
+      });
+
+      listEl.querySelectorAll('.btn-kick-chip').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const peerId = btn.dataset.peer;
+          kickStudent(peerId);
+        };
+      });
+    }
+
+    function getFormattedStudentName() {
+      const g = document.getElementById('inputGrade').value.trim();
+      const c = document.getElementById('inputClass').value.trim();
+      const n = document.getElementById('inputNumber').value.trim();
+      const rawName = document.getElementById('myStudentName').value.trim();
+
+      if (!rawName) return '';
+      if (g && c && n) {
+        const paddedNum = String(parseInt(n, 10) || 0).padStart(2, '0');
+        return `${g}${c}${paddedNum}_${rawName}`;
+      }
+      return rawName;
+    }
+
+    function updateNameFormatPreview() {
+      const g = document.getElementById('inputGrade') ? document.getElementById('inputGrade').value.trim() : '';
+      const c = document.getElementById('inputClass') ? document.getElementById('inputClass').value.trim() : '';
+      const n = document.getElementById('inputNumber') ? document.getElementById('inputNumber').value.trim() : '';
+      const rawName = document.getElementById('myStudentName') ? document.getElementById('myStudentName').value.trim() : '';
+      const previewEl = document.getElementById('nameFormatPreview');
+      if (previewEl) {
+        if (g && c && n && rawName) {
+          const paddedNum = String(parseInt(n, 10) || 0).padStart(2, '0');
+          previewEl.textContent = `입장 표시: ${g}${c}${paddedNum}_${rawName}`;
+        } else {
+          previewEl.textContent = '입장 형식: [학년][반][번호]_[이름] (예: 6507_홍길동)';
+        }
+      }
+    }
+
+    function connectToTeacherRoom() {
+      const g = document.getElementById('inputGrade').value.trim();
+      const c = document.getElementById('inputClass').value.trim();
+      const n = document.getElementById('inputNumber').value.trim();
+      const rawName = document.getElementById('myStudentName').value.trim();
+      const pinInput = document.getElementById('targetRoomPin');
+      const pin = pinInput.value.trim().toUpperCase();
+
+      if (!g || !c || !n || !rawName) {
+        showToast('⚠️ 학년, 반, 번호, 이름을 모두 입력해주세요!');
+        return;
+      }
+      if (!pin) { showToast('⚠️ 방 PIN 번호를 입력해주세요!'); return; }
+
+      const name = getFormattedStudentName();
+
+      if (typeof Peer === 'undefined') {
+        showToast('⚠️ 오프라인 모드로 실행됩니다.');
+        return;
+      }
+
+      const dot = document.getElementById('studentStatusDot');
+      const text = document.getElementById('studentNetworkText');
+      dot.className = 'status-dot';
+      text.textContent = '연결 시도 중...';
+
+      try {
+        studentPeer = new Peer({
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+          }
+        });
+
+        studentPeer.on('open', () => {
+          const teacherPeerId = `streams-room-${pin}`;
+          studentConnToTeacher = studentPeer.connect(teacherPeerId);
+
+          studentConnToTeacher.on('open', () => {
+            dot.className = 'status-dot online';
+            text.textContent = `🟢 방 [${pin}] 연결됨: ${name}`;
+            document.getElementById('studentJoinDropdown').style.display = 'none';
+            document.getElementById('svgPlayerNameDisplay').textContent = `학생: ${name}`;
+            showToast('선생님 방에 성공적으로 연결되었습니다!');
+            studentConnToTeacher.send({ type: 'JOIN', name });
+          });
+
+          studentConnToTeacher.on('data', (data) => {
+            if (data.type === 'TILE_DRAWN') {
+              // 학생이 이전 타일을 아직 배치하지 못한 채 다음 타일이 뽑힌 경우: 남은 빈 칸 중 무작위 자동 배치
+              if (currentDrawnNumber !== null) {
+                autoPlacePendingNumber();
+              }
+              setDrawnNumber(data.tile);
+              showToast(`🎲 [${data.tile === '★' ? '조커(★)' : data.tile + '번'}] 타일 도착! 빈 칸을 터치하세요.`);
+            } else if (data.type === 'GAME_RESET') {
+              resetStudentSheet();
+              showToast('🔄 선생님이 새 게임을 시작했습니다! 시트가 초기화되었습니다.');
+            } else if (data.type === 'SET_GAME_MODE') {
+              applyGameMode(data.gameMode, false);
+            } else if (data.type === 'KICK') {
+              // 선생님에 의한 강제 퇴장 처리
+              if (studentConnToTeacher) {
+                try { studentConnToTeacher.close(); } catch (e) {}
+                studentConnToTeacher = null;
+              }
+              if (studentPeer) {
+                try { studentPeer.destroy(); } catch (e) {}
+                studentPeer = null;
+              }
+
+              resetStudentSheet();
+
+              document.getElementById('studentStatusDot').className = 'status-dot';
+              document.getElementById('studentNetworkText').textContent = '퇴장됨 (이름 수정 후 재입장)';
+              document.getElementById('svgPlayerNameDisplay').textContent = '학생: (미입장)';
+
+              // 재입장 폼 자동 오픈 및 안내
+              const joinBox = document.getElementById('studentJoinDropdown');
+              joinBox.style.display = 'block';
+              const nameInput = document.getElementById('myStudentName');
+              nameInput.value = '';
+              nameInput.placeholder = '본명 입력 (예: 1번 김철수)';
+              nameInput.focus();
+
+              showToast(data.reason || '선생님에 의해 퇴장되었습니다. 본명으로 다시 입장하세요!');
+            }
+          });
+        });
+
+        studentPeer.on('error', () => {
+          dot.className = 'status-dot';
+          text.textContent = '연결 실패 (PIN 확인)';
+        });
+      } catch (e) {}
+    }
+
+    /* 교사용 뽑기 */
+            /* ========================================================== */
+    /* 자동 타일 넘김 타이머 시스템 */
+    /* ========================================================== */
+    let autoDrawInterval = null;
+    let autoDrawRemainMs = 0;
+    let isAutoDrawing = false;
+    let isAutoModeActive = false;
+
+    function getCustomSeconds() {
+      const input = document.getElementById('customSecondsInput');
+      const val = parseInt(input ? input.value : '5', 10);
+      if (isNaN(val) || val < 1) return 5;
+      return Math.min(60, Math.max(1, val));
+    }
+    window.getCustomSeconds = getCustomSeconds;
+
+    function setTimerMode(isAuto) {
+      isAutoModeActive = isAuto;
+      stopAutoDraw();
+
+      const btnMan = document.getElementById('btnModeManual');
+      const btnAuto = document.getElementById('btnModeAuto');
+      const inputGroup = document.getElementById('autoInputGroup');
+      const barWrapper = document.getElementById('autoTimerBarWrapper');
+
+      if (!isAuto) {
+        if (btnMan) { btnMan.style.background = '#4f46e5'; btnMan.style.color = '#ffffff'; }
+        if (btnAuto) { btnAuto.style.background = 'transparent'; btnAuto.style.color = '#cbd5e1'; }
+        if (inputGroup) inputGroup.style.display = 'none';
+        if (barWrapper) barWrapper.style.display = 'none';
+        showToast('수동 넘김 모드로 설정되었습니다.');
+      } else {
+        if (btnAuto) { btnAuto.style.background = '#4f46e5'; btnAuto.style.color = '#ffffff'; }
+        if (btnMan) { btnMan.style.background = 'transparent'; btnMan.style.color = '#cbd5e1'; }
+        if (inputGroup) inputGroup.style.display = 'inline-flex';
+        if (barWrapper) barWrapper.style.display = 'block';
+
+        const sec = getCustomSeconds();
+        const remainEl = document.getElementById('timerRemainSeconds');
+        if (remainEl) remainEl.textContent = `${sec}.0초`;
+        const progEl = document.getElementById('autoTimerProgressBar');
+        if (progEl) progEl.style.width = '100%';
+        showToast(`⏱️ 자동 넘김 모드: [${sec}초] 간격 설정. [▶ 자동 시작]을 누르세요!`);
+
+        const secInp = document.getElementById('customSecondsInput');
+        if (secInp) secInp.focus();
+      }
+    }
+    window.setTimerMode = setTimerMode;
+
+    function toggleAutoDrawAction() {
+      if (isAutoDrawing) {
+        stopAutoDraw();
+        showToast('자동 추첨이 일시정지되었습니다.');
+      } else {
+        startAutoDraw();
+        const sec = getCustomSeconds();
+        showToast(`[${sec}초] 간격으로 자동 추첨을 시작합니다!`);
+      }
+    }
+    window.toggleAutoDrawAction = toggleAutoDrawAction;
+
+    function startAutoDraw() {
+      if (teacherDrawnTiles.length >= maxCells) {
+        showToast('이미 모든 타일(20개)이 추첨되었습니다. 새 게임을 시작하세요.');
+        return;
+      }
+      isAutoDrawing = true;
+      const toggleBtn = document.getElementById('btnAutoDrawToggle');
+      if (toggleBtn) toggleBtn.style.background = '#ef4444';
+      const toggleText = document.getElementById('autoDrawToggleText');
+      if (toggleText) toggleText.textContent = '⏸ 일시정지';
+
+      if (teacherDrawnTiles.length === 0) {
+        hostDrawTile();
+      }
+
+      resetTimerCountdown();
+
+      if (autoDrawInterval) clearInterval(autoDrawInterval);
+      const TICK_MS = 100;
+      autoDrawInterval = setInterval(() => {
+        if (!isAutoDrawing) return;
+        autoDrawRemainMs -= TICK_MS;
+
+        const sec = getCustomSeconds();
+        const totalMs = sec * 1000;
+        const pct = Math.max(0, (autoDrawRemainMs / totalMs) * 100);
+        const progEl = document.getElementById('autoTimerProgressBar');
+        if (progEl) progEl.style.width = `${pct}%`;
+        const remainEl = document.getElementById('timerRemainSeconds');
+        if (remainEl) remainEl.textContent = `${(Math.max(0, autoDrawRemainMs) / 1000).toFixed(1)}초`;
+
+        if (autoDrawRemainMs <= 0) {
+          if (teacherDrawnTiles.length < maxCells) {
+            hostDrawTile();
+            resetTimerCountdown();
+          } else {
+            stopAutoDraw();
+          }
+        }
+      }, TICK_MS);
+    }
+    window.startAutoDraw = startAutoDraw;
+
+    function resetTimerCountdown() {
+      const sec = getCustomSeconds();
+      autoDrawRemainMs = sec * 1000;
+      const progEl = document.getElementById('autoTimerProgressBar');
+      if (progEl) progEl.style.width = '100%';
+      const remainEl = document.getElementById('timerRemainSeconds');
+      if (remainEl) remainEl.textContent = `${sec}.0초`;
+    }
+    window.resetTimerCountdown = resetTimerCountdown;
+
+    function stopAutoDraw() {
+      isAutoDrawing = false;
+      if (autoDrawInterval) clearInterval(autoDrawInterval);
+      autoDrawInterval = null;
+      const toggleBtn = document.getElementById('btnAutoDrawToggle');
+      if (toggleBtn) toggleBtn.style.background = '#10b981';
+      const toggleText = document.getElementById('autoDrawToggleText');
+      if (toggleText) toggleText.textContent = '▶ 자동 시작';
+    }
+    window.stopAutoDraw = stopAutoDraw;
+
+    let teacherTilePool = [];
+    let teacherDrawnTiles = [];
+
+    function initTeacherGame() {
+      teacherTilePool = [];
+      for (let i = 1; i <= 10; i++) teacherTilePool.push(i);
+      for (let i = 11; i <= 19; i++) { teacherTilePool.push(i); teacherTilePool.push(i); }
+      for (let i = 20; i <= 30; i++) teacherTilePool.push(i);
+      teacherTilePool.push('★');
+
+      for (let i = teacherTilePool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [teacherTilePool[i], teacherTilePool[j]] = [teacherTilePool[j], teacherTilePool[i]];
+      }
+
+      teacherDrawnTiles = [];
+      updateTeacherUI();
+      document.getElementById('hostBigTile').textContent = '?';
+      document.getElementById('btnHostDraw').disabled = false;
+      document.getElementById('drawnHistoryChips').innerHTML = '<span style="color: #64748b; font-size: 0.85rem;">아직 뽑힌 타일이 없습니다.</span>';
+    }
+
+    function hostDrawTile() {
+      if (teacherDrawnTiles.length >= maxCells || teacherTilePool.length === 0) {
+        showToast('🏁 20개의 타일을 모두 뽑았습니다!');
+        return;
+      }
+
+      const tile = teacherTilePool.pop();
+      teacherDrawnTiles.push(tile);
+      sound.playDraw();
+
+      const tileEl = document.getElementById('hostBigTile');
+      tileEl.textContent = tile;
+      tileEl.className = 'host-tile-display' + (tile === '★' ? ' is-joker' : '');
+
+      speakTile(tile);
+      updateTeacherUI();
+
+      connectedStudentsMap.forEach(({ conn }) => {
+        if (conn && conn.open) {
+          conn.send({ type: 'TILE_DRAWN', tile: tile });
+        }
+      });
+
+      if (teacherDrawnTiles.length === maxCells) {
+        document.getElementById('btnHostDraw').disabled = true;
+        sound.playFanfare();
+        triggerConfetti();
+      }
+    }
+
+    function speakTile(tile) {
+      if (!document.getElementById('ttsToggle').checked) return;
+      if (!('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const text = (tile === '★') ? '조커!' : `${tile}번!`;
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'ko-KR';
+      window.speechSynthesis.speak(utter);
+    }
+
+    function updateTeacherUI() {
+      const drawnCount = teacherDrawnTiles.length;
+      document.getElementById('hostTurnBadge').textContent = `타일 추첨 (${drawnCount} / ${maxCells})`;
+      document.getElementById('historyCount').textContent = drawnCount;
+
+      const chipContainer = document.getElementById('drawnHistoryChips');
+      if (teacherDrawnTiles.length > 0) {
+        chipContainer.innerHTML = '';
+        teacherDrawnTiles.forEach((val, idx) => {
+          const chip = document.createElement('div');
+          const isJoker = val === '★';
+          const isRecent = idx === teacherDrawnTiles.length - 1;
+          chip.className = `chip ${isJoker ? 'chip-joker' : ''} ${isRecent ? 'recent' : ''}`;
+          chip.textContent = val;
+          chipContainer.appendChild(chip);
+        });
+      }
+    }
+
+    /* 랭킹보드 */
+    let classScores = [];
+
+    function addStudentScoreToLeaderboard(name, score) {
+      const existing = classScores.find(x => x.name === name);
+      if (existing) {
+        existing.score = score;
+      } else {
+        classScores.push({ name, score, id: Date.now() });
+      }
+      renderLeaderboard();
+    }
+
+        let ceremonyStage = 0;
+    let revealedRanksSet = new Set();
+    let rollTimer = null;
+
+    function renderLeaderboard() {
+      classScores.sort((a, b) => b.score - a.score);
+      const tbody = document.getElementById('rankingTableBody');
+      tbody.innerHTML = '';
+
+      const count = classScores.length;
+      document.getElementById('statSubmittedCount').textContent = count;
+      if (count > 0) {
+        document.getElementById('statTopScore').textContent = classScores[0].score;
+        document.getElementById('statAvgScore').textContent = Math.round(classScores.reduce((s, x) => s + x.score, 0) / count);
+      } else {
+        document.getElementById('statTopScore').textContent = 0;
+        document.getElementById('statAvgScore').textContent = 0;
+      }
+
+      if (count === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">아직 제출된 학생 점수가 없습니다.</td></tr>';
+        return;
+      }
+
+      if (ceremonyStage === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #4f46e5; font-weight: 800; padding: 36px 16px; font-size: 1rem; background: #f8fafc;">🔒 랭킹이 아직 공개되지 않았습니다.<br><span style="font-size: 0.85rem; color: #64748b; font-weight: 600;">상단의 [🎉 랭킹 공개 시작하기] 버튼을 누르면 시상식이 시작됩니다!</span></td></tr>';
+        return;
+      }
+
+      classScores.forEach((item, index) => {
+        if (!revealedRanksSet.has(index)) return;
+
+        const rank = index + 1;
+        const row = document.createElement('tr');
+        row.className = `ranking-row rank-${rank} ${item.isNew ? 'new-entry' : ''}`;
+        row.id = `rank-row-${index}`;
+
+        let medalClass = '';
+        if (rank === 1) medalClass = 'background:#fef08a; color:#854d0e; font-size:1.1rem; box-shadow:0 0 10px #fef08a;';
+        else if (rank === 2) medalClass = 'background:#e2e8f0; color:#475569; font-size:1rem;';
+        else if (rank === 3) medalClass = 'background:#fed7aa; color:#9a3412; font-size:1rem;';
+
+        row.innerHTML = `
+          <td><span class="rank-medal" style="${medalClass}">${rank}</span></td>
+          <td style="font-weight: 800; color: #1e293b;">${escapeHtml(item.name)}</td>
+          <td style="text-align: right; color: ${rank === 1 ? '#ea580c' : '#4f46e5'}; font-weight: 900; font-size: 1.1rem;">${item.score}점</td>
+          <td style="text-align: right; font-size: 0.8rem; color: #10b981; font-weight: 700;">완료</td>
+        `;
+        tbody.appendChild(row);
+      });
+
+      const scrollWrap = document.querySelector('.ranking-scroll-container');
+      if (scrollWrap && ceremonyStage === 1) {
+        scrollWrap.scrollTop = scrollWrap.scrollHeight;
+      }
+    }
+
+    function updateCeremonyButton() {
+      const btn = document.getElementById('btnCeremonyControl');
+      if (!btn) return;
+
+      if (ceremonyStage === 0) {
+        btn.textContent = '🎉 랭킹 공개 시작하기 (꼴찌~4위)';
+        btn.style.background = 'linear-gradient(135deg, #f59e0b, #ea580c)';
+        btn.style.boxShadow = '0 4px 10px rgba(245, 158, 11, 0.4)';
+        btn.style.color = 'white';
+        btn.disabled = false;
+      } else if (ceremonyStage === 1) {
+        btn.textContent = '⏳ 꼴찌부터 4위까지 공개 중...';
+        btn.style.background = '#64748b';
+        btn.style.boxShadow = 'none';
+        btn.disabled = true;
+      } else if (ceremonyStage === 2) {
+        btn.textContent = '🥉 3위 공개하기';
+        btn.style.background = 'linear-gradient(135deg, #fdba74, #ea580c)';
+        btn.style.color = '#7c2d12';
+        btn.style.boxShadow = '0 4px 12px rgba(234, 88, 12, 0.4)';
+        btn.disabled = false;
+      } else if (ceremonyStage === 3) {
+        btn.textContent = '🥈 2위 공개하기';
+        btn.style.background = 'linear-gradient(135deg, #e2e8f0, #94a3b8)';
+        btn.style.color = '#1e293b';
+        btn.style.boxShadow = '0 4px 12px rgba(100, 116, 139, 0.4)';
+        btn.disabled = false;
+      } else if (ceremonyStage === 4) {
+        btn.textContent = '🥇 대망의 1위 우승자 공개!';
+        btn.style.background = 'linear-gradient(135deg, #fde047, #eab308)';
+        btn.style.color = '#713f12';
+        btn.style.boxShadow = '0 4px 15px rgba(234, 179, 8, 0.6)';
+        btn.disabled = false;
+      } else if (ceremonyStage === 5) {
+        btn.textContent = '🔄 랭킹 다시 가리기';
+        btn.style.background = '#475569';
+        btn.style.color = 'white';
+        btn.style.boxShadow = 'none';
+        btn.disabled = false;
+      }
+    }
+
+    function runCeremonyStep() {
+      const count = classScores.length;
+      if (count === 0) {
+        showToast('아직 제출된 학생 점수가 없습니다.');
+        return;
+      }
+
+      if (ceremonyStage === 0) {
+        ceremonyStage = 1;
+        revealedRanksSet.clear();
+        updateCeremonyButton();
+
+        const remainingIndices = [];
+        for (let i = count - 1; i >= 3; i--) {
+          remainingIndices.push(i);
+        }
+
+        if (remainingIndices.length === 0) {
+          ceremonyStage = (count >= 3) ? 2 : (count === 2 ? 3 : 4);
+          updateCeremonyButton();
+          renderLeaderboard();
+          return;
+        }
+
+        let stepIdx = 0;
+        rollTimer = setInterval(() => {
+          if (stepIdx < remainingIndices.length) {
+            const rIdx = remainingIndices[stepIdx];
+            revealedRanksSet.add(rIdx);
+            renderLeaderboard();
+            sound.playPop();
+            stepIdx++;
+          } else {
+            clearInterval(rollTimer);
+            ceremonyStage = (count >= 3) ? 2 : (count === 2 ? 3 : 4);
+            updateCeremonyButton();
+            sound.playTone(440, 'triangle', 0.2);
+            showToast('👏 4위까지 공개 완료! 이제 TOP 3를 공개하세요.');
+          }
+        }, 320);
+      } else if (ceremonyStage === 2) {
+        if (count >= 3) {
+          revealedRanksSet.add(2);
+          sound.playTone(550, 'triangle', 0.3, 0.18);
+          renderLeaderboard();
+          showToast(`🥉 3위 [${classScores[2].name}] 학생 공개!`);
+        }
+        ceremonyStage = 3;
+        updateCeremonyButton();
+      } else if (ceremonyStage === 3) {
+        if (count >= 2) {
+          revealedRanksSet.add(1);
+          sound.playTone(700, 'triangle', 0.35, 0.18);
+          renderLeaderboard();
+          showToast(`🥈 2위 [${classScores[1].name}] 학생 공개!`);
+        }
+        ceremonyStage = 4;
+        updateCeremonyButton();
+      } else if (ceremonyStage === 4) {
+        if (count >= 1) {
+          revealedRanksSet.add(0);
+          sound.playFanfare();
+          triggerConfetti();
+          renderLeaderboard();
+          showToast(`🏆 대망의 1위 우승자 [${classScores[0].name}] 축하합니다!!`);
+        }
+        ceremonyStage = 5;
+        updateCeremonyButton();
+      } else if (ceremonyStage === 5) {
+        ceremonyStage = 0;
+        revealedRanksSet.clear();
+        updateCeremonyButton();
+        renderLeaderboard();
+        showToast('랭킹이 비공개 상태로 전환되었습니다.');
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function triggerConfetti() {
+      const canvas = document.getElementById('confettiCanvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      const particles = [];
+      const colors = ['#4f46e5', '#f59e0b', '#10b981', '#ef4444', '#06b6d4'];
+
+      for (let i = 0; i < 70; i++) {
+        particles.push({
+          x: canvas.width / 2, y: canvas.height / 2,
+          vx: (Math.random() - 0.5) * 14, vy: (Math.random() - 0.7) * 14,
+          size: Math.random() * 6 + 3,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          alpha: 1
+        });
+      }
+
+      let frame = 0;
+      function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        let alive = false;
+        particles.forEach(p => {
+          p.x += p.vx; p.y += p.vy; p.vy += 0.3; p.alpha -= 0.015;
+          if (p.alpha > 0) {
+            alive = true;
+            ctx.save();
+            ctx.globalAlpha = p.alpha;
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, p.size, p.size);
+            ctx.restore();
+          }
+        });
+        frame++;
+        if (alive && frame < 90) requestAnimationFrame(animate);
+        else ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      animate();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      // 1. 보드판 쉐브론 트랙 및 점수표 그래픽 즉시 안전하게 렌더링 (어떤 에러에도 무조건 렌더링 보장)
+      try {
+        renderScoreTableRows();
+        renderSvgTrack();
+      } catch (err) {
+        console.error('Board render error:', err);
+      }
+
+      const urlParams = new URLSearchParams(window.location.search);
+      /* ========================================================== */
+      /* 교사용 권한 분리 및 학생 오조작 방지 시스템 */
+      /* ========================================================== */
+      const TEACHER_PIN = '7410'; // 기본 교사 비밀번호
+      let isTeacherUnlocked = false;
+
+      function unlockTeacherMode(andSwitchTab = true) {
+        isTeacherUnlocked = true;
+        safeStorage.setItem('streams_teacher_unlocked', 'true');
+        
+        // 탭 바 보이기
+        const tabBar = document.querySelector('.tab-bar');
+        tabBar.classList.add('show-teacher-tabs');
+
+        // 헤더 버튼 변경
+        document.getElementById('teacherAuthIcon').textContent = '👨‍🏫';
+        document.getElementById('teacherAuthText').textContent = '교사 모드';
+        document.getElementById('btnTeacherAuth').style.background = '#4f46e5';
+        document.getElementById('btnTeacherAuth').style.color = '#ffffff';
+
+        // 교사용 방 자동 시작
+        if (!teacherPeer) startTeacherRoom();
+
+        if (andSwitchTab) {
+          // 교사용 탭으로 자동 이동
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+          
+          const teacherTabBtn = document.querySelector('.tab-btn[data-tab="teacherTab"]');
+          if (teacherTabBtn) teacherTabBtn.classList.add('active');
+          document.getElementById('teacherTab').classList.add('active');
+          showToast('🔓 교사용 모드가 활성화되었습니다.');
+        }
+      }
+
+      // URL 파라미터 확인 (?teacher 또는 ?role=teacher 면 자동 해제)
+      const urlHasTeacher = urlParams.has('teacher') || urlParams.get('role') === 'teacher';
+      const sessionUnlocked = safeStorage.getItem('streams_teacher_unlocked') === 'true';
+
+      if (urlHasTeacher || sessionUnlocked) {
+        unlockTeacherMode(urlHasTeacher);
+      }
+
+      // 교사 인증 버튼 클릭 시
+      document.getElementById('btnTeacherAuth').onclick = () => {
+        if (isTeacherUnlocked) {
+          // 이미 인증된 상태면 교사용 탭으로 이동
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+          document.querySelector('.tab-btn[data-tab="teacherTab"]').classList.add('active');
+          document.getElementById('teacherTab').classList.add('active');
+        } else {
+          // 인증 모달 띄우기
+          document.getElementById('teacherPasswordInput').value = '';
+          document.getElementById('teacherAuthModal').classList.add('active');
+          setTimeout(() => document.getElementById('teacherPasswordInput').focus(), 150);
+        }
+      };
+
+      document.getElementById('btnCloseAuthModal').onclick = () => {
+        document.getElementById('teacherAuthModal').classList.remove('active');
+      };
+
+      document.getElementById('btnSubmitTeacherAuth').onclick = () => {
+        const inputPw = document.getElementById('teacherPasswordInput').value;
+        if (inputPw === TEACHER_PIN) {
+          document.getElementById('teacherAuthModal').classList.remove('active');
+          unlockTeacherMode(true);
+        } else {
+          showToast('❌ 비밀번호가 올바르지 않습니다.');
+          document.getElementById('teacherPasswordInput').value = '';
+          document.getElementById('teacherPasswordInput').focus();
+        }
+      };
+
+      document.getElementById('teacherPasswordInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          document.getElementById('btnSubmitTeacherAuth').click();
+        }
+      });
+
+      renderScoreTableRows();
+      renderSvgTrack();
+      stopAutoDraw();
+        initTeacherGame();
+      renderLeaderboard();
+
+      // urlParams already initialized
+      const urlPin = urlParams.get('pin');
+      if (urlPin) {
+        document.getElementById('targetRoomPin').value = urlPin;
+        document.getElementById('studentJoinDropdown').style.display = 'block';
+        showToast(`PIN [${urlPin}] 번호가 감지되었습니다. 이름을 넣고 입장하세요!`);
+      }
+
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+          btn.classList.add('active');
+          const targetTab = btn.dataset.tab;
+          document.getElementById(targetTab).classList.add('active');
+          if (targetTab === 'teacherTab' && !teacherPeer) startTeacherRoom();
+        });
+      });
+
+      document.getElementById('studentRoomStatusBadge').onclick = () => {
+        const box = document.getElementById('studentJoinDropdown');
+        box.style.display = box.style.display === 'none' ? 'block' : 'none';
+      };
+      document.getElementById('btnConnectRoom').onclick = connectToTeacherRoom;
+      ['inputGrade', 'inputClass', 'inputNumber', 'myStudentName'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('input', updateNameFormatPreview);
+          el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') connectToTeacherRoom();
+          });
+        }
+      });
+      updateNameFormatPreview();
+
+      // btnUndoPlacement replaced by svgBtnLargeUndo
+      document.getElementById('btnResetSheet').onclick = resetStudentSheet;
+      document.getElementById('btnShowMyScore').onclick = () => {
+        document.getElementById('scoreModal').classList.add('active');
+      };
+
+      
+      /* 게임 모드 (보통 vs 상급자) 전환 제어 */
+      function applyGameMode(mode, broadcast = true) {
+        currentGameMode = mode;
+        const isExp = (mode === 'expert');
+
+        // 학생 화면 배지 및 점수표 갱신
+        const badge = document.getElementById('studentModeBadge');
+        if (badge) {
+          badge.textContent = isExp ? '상급 모드 (함정 룰 🔥)' : '보통 모드';
+          badge.style.background = isExp ? '#ffedd5' : '#e0e7ff';
+          badge.style.color = isExp ? '#c2410c' : '#4338ca';
+          badge.style.borderColor = isExp ? '#fdba74' : '#c7d2fe';
+        }
+
+        renderScoreTableRows();
+
+        // 교사용 버튼 스타일 갱신
+        const btnNorm = document.getElementById('btnModeNormal');
+        const btnExp = document.getElementById('btnModeExpert');
+        const guide = document.getElementById('teacherModeGuide');
+
+        if (btnNorm && btnExp) {
+          btnNorm.style.background = isExp ? 'transparent' : '#4f46e5';
+          btnNorm.style.color = isExp ? '#cbd5e1' : 'white';
+          btnExp.style.background = isExp ? '#ea580c' : 'transparent';
+          btnExp.style.color = isExp ? 'white' : '#cbd5e1';
+          if (guide) {
+            guide.innerHTML = isExp 
+              ? '<span style="color:#fdba74; font-weight:800;">🔥 상급자 함정 점수 적용: 6칸(+3점), 12칸(+20점), 17칸(+50점) 감점!</span>'
+              : '일반 점수 적용: 6칸(+9점), 12칸(+35점), 17칸(+85점)';
+          }
+        }
+
+        // 연결된 학생들에게 브로드캐스트
+        if (broadcast && connectedStudentsMap.size > 0) {
+          connectedStudentsMap.forEach(({ conn }) => {
+            if (conn && conn.open) {
+              conn.send({ type: 'SET_GAME_MODE', gameMode: mode });
+            }
+          });
+        }
+      }
+
+      document.getElementById('btnModeNormal').onclick = () => {
+        applyGameMode('normal', true);
+        showToast('규칙이 [보통 모드]로 설정되었습니다.');
+      };
+
+      document.getElementById('btnModeExpert').onclick = () => {
+        applyGameMode('expert', true);
+        showToast('규칙이 [상급 모드 (함정 룰)]로 설정되었습니다!');
+      };
+
+      const btnHostDrawEl = document.getElementById('btnHostDraw');
+      if (btnHostDrawEl) {
+        btnHostDrawEl.onclick = () => {
+          hostDrawTile();
+          if (isAutoDrawing) resetTimerCountdown();
+        };
+      }
+
+      const btnModeManEl = document.getElementById('btnModeManual');
+      if (btnModeManEl) btnModeManEl.onclick = () => setTimerMode(false);
+
+      const btnModeAutoEl = document.getElementById('btnModeAuto');
+      if (btnModeAutoEl) btnModeAutoEl.onclick = () => setTimerMode(true);
+
+      const secInputEl = document.getElementById('customSecondsInput');
+      if (secInputEl) {
+        secInputEl.addEventListener('input', () => {
+          if (!isAutoDrawing) {
+            const sec = getCustomSeconds();
+            const remainEl = document.getElementById('timerRemainSeconds');
+            if (remainEl) remainEl.textContent = `${sec}.0초`;
+            const progEl = document.getElementById('autoTimerProgressBar');
+            if (progEl) progEl.style.width = '100%';
+          }
+        });
+      }
+
+      const btnAutoToggleEl = document.getElementById('btnAutoDrawToggle');
+      if (btnAutoToggleEl) btnAutoToggleEl.onclick = toggleAutoDrawAction;
+
+      const svgLargeUndo = document.getElementById('svgBtnLargeUndo');
+      if (svgLargeUndo) svgLargeUndo.onclick = undoPlacement;
+
+      const btnCeremony = document.getElementById('btnCeremonyControl');
+      if (btnCeremony) btnCeremony.onclick = runCeremonyStep;
+
+      const btnRevealAll = document.getElementById('btnRevealAllDirectly');
+      if (btnRevealAll) {
+        btnRevealAll.onclick = () => {
+          ceremonyStage = 5;
+          revealedRanksSet.clear();
+          for (let i = 0; i < classScores.length; i++) revealedRanksSet.add(i);
+          updateCeremonyButton();
+          renderLeaderboard();
+          sound.playFanfare();
+          showToast('전체 순위가 즉시 공개되었습니다.');
+        };
+      }
+
+      document.getElementById('btnHostReset').onclick = () => {
+        const btn = document.getElementById('btnHostReset');
+        
+        // 타일이 하나도 안 뽑힌 상태면 바로 알림
+        if (teacherDrawnTiles.length === 0) {
+          showToast('이미 시작 전 새 게임 상태입니다.');
+          return;
+        }
+
+        // 게임 진행 중(1~19개)일 때 실수 방지 2단계 확인 (브라우저 confirm 대신 버튼 자체 변환)
+        if (!hostResetConfirming && teacherDrawnTiles.length < maxCells) {
+          hostResetConfirming = true;
+          btn.textContent = '한번 더 클릭시 리셋!';
+          btn.style.background = '#ef4444';
+
+          hostResetTimer = setTimeout(() => {
+            hostResetConfirming = false;
+            btn.textContent = '새 게임';
+            btn.style.background = 'rgba(255,255,255,0.2)';
+          }, 3000);
+          return;
+        }
+
+        // 20개 완료 후이거나 2번째 클릭 시 즉시 리셋 실행
+        clearTimeout(hostResetTimer);
+        hostResetConfirming = false;
+        btn.textContent = '새 게임';
+        btn.style.background = 'rgba(255,255,255,0.2)';
+
+        // 1. 교사용 게임 초기화
+        stopAutoDraw();
+        initTeacherGame();
+        classScores = [];
+        renderLeaderboard();
+
+        // 2. 연결된 모든 학생 기기에 실시간 리셋 명령 전송
+        connectedStudentsMap.forEach(({ conn }) => {
+          if (conn && conn.open) {
+            conn.send({ type: 'GAME_RESET' });
+          }
+        });
+
+        sound.playFanfare();
+        showToast('🔄 새 게임이 시작되었습니다! (학생 시트도 자동 초기화)');
+      };
+
+      
+      // 방 PIN 직접 변경 제어
+      document.getElementById('btnChangePin').onclick = () => {
+        document.getElementById('customPinInput').value = roomPin;
+        document.getElementById('changePinModal').classList.add('active');
+        setTimeout(() => document.getElementById('customPinInput').focus(), 150);
+      };
+
+      document.getElementById('btnClosePinModal').onclick = () => {
+        document.getElementById('changePinModal').classList.remove('active');
+      };
+
+      document.getElementById('btnRandomPin').onclick = () => {
+        document.getElementById('customPinInput').value = generateRoomPin();
+      };
+
+      document.getElementById('btnSaveCustomPin').onclick = () => {
+        const newPin = document.getElementById('customPinInput').value.trim().toUpperCase();
+        if (!newPin) {
+          showToast('⚠️ 방 번호를 입력해주세요!');
+          return;
+        }
+        document.getElementById('changePinModal').classList.remove('active');
+        if (teacherPeer) {
+          try { teacherPeer.destroy(); } catch (e) {}
+          teacherPeer = null;
+        }
+        roomPin = newPin;
+        connectedStudentsMap.clear();
+        updateConnectedStudentsUI();
+        startTeacherRoom();
+        showToast(`방 번호가 [${roomPin}](으)로 설정되었습니다!`);
+      };
+
+      document.getElementById('btnCopyInviteLink').onclick = () => {
+        if (!roomPin) return;
+        const fullUrl = window.location.origin + window.location.pathname + `?pin=${roomPin}`;
+        navigator.clipboard.writeText(fullUrl).then(() => {
+          showToast('📋 학생 참여 링크가 복사되었습니다!');
+        });
+      };
+
+      
+      // 대형 QR코드 확대 제어
+      const QR_IMG_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAcIAAAHCCAIAAADzel4SAAAQAElEQVR4nOzd0ZLcNpIFUGlj//+XvQ+K1XSMZbq6biUzEzznrV0DEATAbIrNO/W/f/311w8A3vU/PwAIKKMAEWUUIKKMAkSUUYCIMgoQUUYBIsooQEQZBYgoowARZRQgoowCRJRRgIgyChBRRgEiyihARBkFiCijABFlFCCijAJElFGAiDIKEFFGASLKKEBEGQWIKKMAEWUUIKKMAkSUUYCIMgoQUUYBIsooQEQZBYgoowARZRQgoowCRJRRgIgyChBRRgEi//tjkp8/f/7Y4K+//voBJ3INvuHnkNFsWbyvKqbu6zz8vf/k067j1o15o8lz5Rp824h/1G9cvx8Fw/6vDj/4Y9dx68a80eS5cg0m+svo6ovng4P/Y1e//2Pyaddx68a80eS5cg2GmsvoAZfN8fdQnM01mOsso8cUIJWUpVyDH+GFJ4BIWxk97A4uP50//s3x939MPu06bt2YNxo4V67BT3E3Osh/XRgf/LHruHVj3shcnartvdHznifa2eziGvyUWSmma3fOkb8awd+5Bv9oRxm9/5fMryPev5BdqZ6fQX6ma8zXklHNzHT1rsJzrsE3LHg22nhl3nzorlTP5HTNe5JRzcx09a7Cc67B90wvo+2TeNsAulI9k9M170lGNTPT1bsKz7kG3za6jA6ZPn874rFcg6+YW0ZHTZxKygO5Bl/kvVGAyNAyOvA3T/WQulI9A9M1oWRUMzNdLavwwGvwbe5GB+lKqpyXrklG1ZXaOm8VnmNoimnmPtg4ZvgnrsFP2ZRiuvbdNzxUPfisx16DJ5TR916R+9Xq/oXcmK45z8y52rtGu67Bj1v/bDR8zfjmd8U3pmvOM3Ou9q7Rrmuwwu4y+pEF6MpcXvzH77at+/Q8M+dq7xrtugaLLC6jdTcCwCtcg79sLaMfn3SVFL7FNfib90YBIivLaNFvrepfhhvTNeeZOVfr1mjpNVjE3eitNqZrzjNzrqzRXue8fr9FcgFct6379Dwz58oaLeVuFCDibvRuM7MokjlfdaXFNs4VP9yN3mxmFkUy56uutNjGueIXZfQ+M7Mokjn/OoAb0mIb54rflFGAiDIKEFFGASLK6H1m5oUkc/51AO3fpzRzrvhNGb3VzCyKZM5XXWmxjXPFL94bvdvMC0Ay56uutNjGueKHu1GAkLvRu81MuXTlZzae78wkkoxTI3ejt5qZcunKz2w835lJpGMyTkt/Aawso0VzXb2EM1MuXfmZjec7M4nUknFyw/uVu1GAyNYy+vFfhn67wre4Bn9bfDda93oj8ArX4C+7/1FfF7apMDPlUtdz3XG7zrdrzNfqen776C2dNFr/bDRcgJvXb2bKpa7nuuN2nW/XmK/V9fzG0W9uPsHPrnO4/kviG6P67p8mP36IA3YDj+Ia/JRzXr9XxaDXY69BKaa7zcztJG27zigx87gbZ5If3ht9XcWb0h/8MTlu0nZmqufazONunMmbjT2voWX0yH0wM7eTtO06o8TM4w6cyVNrcQV3owCRuWV01C9Dv5l5INfgi0bfjQ6ZODWUx3INvmL6P+rbp++DA5iZ20nadp1RYuZxJ8/kSddgkQXPRhsn8eOHnpnbSdp2nVFi5nEnz+RJ12CFoSmmP+p6v+9FXtZjF9fgp2x6/d4zSujlGvwjKaa7zUwiafvktoS8N/oZL27cmUkkbZ/cllxbGX3gL8yZSSRtH9v2sGuw8XTcjQJEOsvoMb8MPYpiKdfgRzTfjR6wimooq7kGc/3/qF+9isl77N/qQVttK9q+8T+eZsLgRzwbXbqKbwx7ZhJJ2ye3fbvJBEOG/XPU9G15UcM/5DmVa/ANs8oowDpSTHebmXKp+7RrVHXHTWzsmX/lvdFbzUy51P3YNaq64yY29swrlNH7zEy51H3aNaq64yY29syLlFGAiDIKEFFGASLK6H1mplzqPu0aVd1xExt75kXK6K1mplzqfuwaVd1xExt75hVevweIuBsFiPSnmDYmc2YmRroyP3Vt68w8o65d5zoKNd+NbkzmzEyM1I25q22dmWfUtetcR7nOMroxmTMzMVI35q62dWaeUdeucx19hGejABFlFCCijAJExn0z6PBkzszESN2Yu9rWmXlGXbvOdfQRs74ZdEUyZ2ZipG7MXW3rzDyjrl3nOspJMQFEPBsFiJycYqprW9dzXduZ51vXczIbM1dh5hnNbHuzY1NMdW3req5rO/N863pOZmPmKsw8o5lt73dmiqmubV3PdW1nnm9dz8lszFyFmWc0s20Lz0YBIsooQEQZBYicmWKqa1vXc13bmedb13MyGzNXYeYZzWzb4tgUU13bup7r2s4837qek9mYuQozz2hm2/tJMQFEPBsFiPSnmBISI59qm6ibq7p5vtbV88wV7DJzrv5o8d2oxMin2ibq5qpunq919TxzBbvMnKt/srWMSox8qm2ibq7q5vlaV88zV7DLzLm64NkoQEQZBYgoowCRrWVUYuRTbRN1c1U3z9e6ep65gl1mztWFxXejEiOfapuom6u6eb7W1fPMFewyc67+iRQTQMSzUYDI7hTTtaclkTaeb6LrfJNRdbXtWqM6Ukx3eFoSaeP5JrrONxlVV9uuNaojxXSHpyWRNp5vout8k1F1te1aozpSTACnUUYBIsooQOTMMvq0JNLG8010nW8yqq62XWtUR4rpPk9LIm0830TX+Saj6mrbtUZ1pJgAjuLZKEBkeoppZjJn5qfXNs5G3aiSnutGlRy3a1Qbr4WPG303OjOZM/PHaxtno25USc91o0qO2zWqjddChblltCupUnfcmWeUtN24RknPdaNKjts1qo3XQhHPRgEiyihARBkFiMwtozOTOTM/vbZxNupGlfRcN6rkuF2j2ngtFBl9N9qVVKk77swzStpuXKOk57pRJcftGtXGa6GCFBNAxLNRgMjuFFNd25muz+i8851p5jzXjcq++leLU0x1bWe6PqPzznemmfNcNyr76hVbU0x1bWdal+s40sx57kpA8ZtnowARZRQgoowCRLammOraznR9Rued70wz57luVPbVixanmOrazrQr13GqmfPclYDiFykmgIhnowCR/hRTkszpyjh1jTkZVV3bO1W/tLjl3O8c58wrdNSObb4bTZI5XRmnrjEno6pryz261mjmFTptx3aW0a7vY6lrWzfmZFR1bblH1xrNvEJ9FxPAaab/PzzBnTcaW54RM4q7UYBIZxlNkjldGaeuMSejqmvLPbrWaOYVOnDHNt+Ndn0fS13bujEno6pryz261mjmFeq7mOB7/unZ6NetW/H81KXBizwbBYhIMb3TNlF3vnVzxVdPy6F17SsppldtTDEl6s63bq74qm4mZ+7nrn21az93Phu9fuaVfJoct07d+dbN1QRdF8n1HdD1//K7Zu7nrn21bj97NgoQUUYBIsooQESK6XttE3XnWzdXfFU3kzP3c9e+kmL6no0ppkTd+dbNFV/VzeTM/dy1r6SY4JPm/KUe/sizUYDIc///Rjemp+rajsqEDLdxJs/LR0kx9duYnqprOy0TMtnGmTwvHzVt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";
+
+      function openLargeQrModal() {
+        document.getElementById('zoomModalPinText').textContent = roomPin || '----';
+        document.getElementById('qrZoomModal').classList.add('active');
+      }
+
+      function closeLargeQrModal() {
+        document.getElementById('qrZoomModal').classList.remove('active');
+      }
+
+      document.getElementById('btnOpenQrZoom').onclick = openLargeQrModal;
+      document.getElementById('btnQrTextZoom').onclick = openLargeQrModal;
+      document.getElementById('btnCloseQrZoom').onclick = closeLargeQrModal;
+      document.getElementById('btnCloseQrZoomBtn').onclick = closeLargeQrModal;
+
+      // 새 탭/창에서 대형 열기
+      document.getElementById('btnOpenQrNewTab').onclick = () => {
+        try {
+          const win = window.open('', '_blank');
+          if (win) {
+            win.document.write(`
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <meta charset="UTF-8">
+                <title>학생 입장 QR코드</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                  body { margin: 0; background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Pretendard", sans-serif; text-align: center; padding: 20px; box-sizing: border-box; }
+                  h1 { font-size: 2.2rem; font-weight: 900; margin: 0 0 10px; }
+                  p { font-size: 1.2rem; color: #94a3b8; margin: 0 0 24px; }
+                  .qr-card { background: white; padding: 20px; border-radius: 24px; box-shadow: 0 25px 50px rgba(0,0,0,0.5); display: inline-block; }
+                  img { width: 420px; height: 420px; max-width: 80vw; max-height: 60vh; object-fit: contain; display: block; }
+                  .pin-badge { margin-top: 24px; background: #1e1b4b; border: 2px dashed #818cf8; color: #a5b4fc; padding: 10px 24px; border-radius: 14px; font-size: 1.4rem; font-weight: 800; }
+                  .pin-badge strong { color: #ffffff; font-size: 1.8rem; margin-left: 8px; }
+                </style>
+              </head>
+              <body>
+                <h1>📱 학생 태블릿 입장용 QR코드</h1>
+                <p>태블릿 카메라로 QR코드를 비추면 스트림스 게임으로 바로 입장합니다!</p>
+                <div class="qr-card">
+                  <img src="${QR_IMG_DATA_URI}" alt="QR Code">
+                </div>
+                <div class="pin-badge">
+                  방 번호(PIN): <strong>${roomPin || '----'}</strong>
+                </div>
+              </body>
+              </html>
+            `);
+            win.document.close();
+          } else {
+            showToast('팝업 차단이 감지되어 화면 내 대형 팝업으로 표시됩니다.');
+          }
+        } catch (e) {
+          showToast('화면 내 대형 팝업을 확인하세요.');
+        }
+      };
+
+      const btnCopySrc = document.getElementById('btnCopyEntireSource'); if (btnCopySrc) btnCopySrc.onclick = () => {
+        const fullSource = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+        navigator.clipboard.writeText(fullSource).then(() => {
+          showToast('✅ 구글 사이트에 붙여넣을 HTML 코드 전체가 복사되었습니다!');
+        }).catch(() => {
+          const ta = document.createElement('textarea');
+          ta.value = fullSource;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          showToast('✅ HTML 코드 전체가 복사되었습니다!');
+        });
+      };
+      document.getElementById('btnFullscreen').onclick = () => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+          document.exitFullscreen().catch(() => {});
+        }
+      };
+
+      window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && document.getElementById('teacherTab').classList.contains('active')) {
+          e.preventDefault();
+          hostDrawTile();
+        }
+      });
+
+      let boardResetConfirming = false;
+      let boardResetTimer = null;
+      document.getElementById('btnResetBoard').onclick = () => {
+        const btn = document.getElementById('btnResetBoard');
+        if (classScores.length === 0) {
+          showToast('초기화할 점수 기록이 없습니다.');
+          return;
+        }
+        if (!boardResetConfirming) {
+          boardResetConfirming = true;
+          btn.textContent = '정말 삭제? (클릭)';
+          btn.style.color = '#ef4444';
+          boardResetTimer = setTimeout(() => {
+            boardResetConfirming = false;
+            btn.textContent = '초기화';
+            btn.style.color = '';
+          }, 2500);
+          return;
+        }
+        clearTimeout(boardResetTimer);
+        boardResetConfirming = false;
+        btn.textContent = '초기화';
+        btn.style.color = '';
+        classScores = [];
+        renderLeaderboard();
+        showToast('학급 랭킹이 초기화되었습니다.');
+      };
+
+      document.getElementById('btnCloseModal').onclick = () => {
+        document.getElementById('scoreModal').classList.remove('active');
+      };
+
+      document.getElementById('btnCopyResult').onclick = () => {
+        const score = document.getElementById('modalFinalScore').textContent;
+        navigator.clipboard.writeText(`[스트림스] 내 점수: ${score}`).then(() => {
+          showToast('점수가 복사되었습니다!');
+        });
+      };
+
+      const soundBtn = document.getElementById('btnSound');
+      soundBtn.onclick = () => {
+        sound.enabled = !sound.enabled;
+        soundBtn.textContent = sound.enabled ? '🔊' : '🔇';
+      };
+    });
+  </script>
+
+  <!-- 선생님 모드 인증 모달 (구글 사이트 iframe에서도 100% 작동하는 커스텀 팝업) -->
+  <div class="modal-overlay" id="teacherAuthModal">
+    <div class="modal-card" style="max-width: 340px; text-align: center;">
+      <button class="modal-close" id="btnCloseAuthModal">✕</button>
+      <div style="font-size: 2.2rem; margin-bottom: 8px;">🔐</div>
+      <h3 style="font-size: 1.1rem; font-weight: 800; color: #1e293b; margin-bottom: 6px;">선생님 모드 잠금 해제</h3>
+      <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 14px;">
+        선생님 전용 비밀번호 4자리를 입력해주세요.<br>
+        
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <input type="password" id="teacherPasswordInput" placeholder="비밀번호 4자리" maxlength="8" style="padding: 10px; border: 1.5px solid #cbd5e1; border-radius: 8px; font-size: 1.1rem; text-align: center; letter-spacing: 4px; font-weight: 900;">
+        <button class="btn btn-primary" id="btnSubmitTeacherAuth" style="padding: 10px; font-size: 0.9rem;">인증 및 모드 열기</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- 방 PIN 직접 변경 모달 -->
+  <div class="modal-overlay" id="changePinModal">
+    <div class="modal-card" style="max-width: 320px; text-align: center;">
+      <button class="modal-close" id="btnClosePinModal">✕</button>
+      <h3 style="font-size: 1.05rem; font-weight: 800; margin-bottom: 6px;">방 번호(PIN) 설정</h3>
+      <p style="font-size: 0.78rem; color: #64748b; margin-bottom: 12px;">우리 반만의 번호를 정해보세요. (예: 501, 1반, 7777)</p>
+      <input type="text" id="customPinInput" placeholder="방 번호 입력" maxlength="8" style="padding: 8px 10px; border: 1.5px solid #cbd5e1; border-radius: 8px; font-size: 1.1rem; text-align: center; font-weight: 900; margin-bottom: 8px; width: 100%;">
+      <div style="display: flex; gap: 6px;">
+        <button class="btn btn-secondary" id="btnRandomPin" style="flex: 1; font-size: 0.8rem;">랜덤 생성</button>
+        <button class="btn btn-primary" id="btnSaveCustomPin" style="flex: 1; font-size: 0.8rem;">적용하기</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- 대형 QR코드 확대 모달 (교실 앞 전자칠판 / TV 프로젝터용) -->
+  <div class="modal-overlay" id="qrZoomModal" style="z-index: 150;">
+    <div class="modal-card" style="max-width: 480px; text-align: center; padding: 24px 20px;">
+      <button class="modal-close" id="btnCloseQrZoom">✕</button>
+      <h3 style="font-size: 1.2rem; font-weight: 900; color: #1e293b; margin-bottom: 4px;">📱 학생 태블릿 입장용 QR코드</h3>
+      <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 16px;">교실 맨 뒤에서도 태블릿 카메라로 비추면 바로 열립니다!</p>
+      
+      <!-- 대형 QR 이미지 -->
+      <div style="background: white; border-radius: 16px; padding: 16px; display: inline-block; box-shadow: 0 10px 25px rgba(0,0,0,0.12); border: 2px solid #cbd5e1; margin-bottom: 14px;">
+        <img src="data:image/png;base64,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MQFEPBsFiPSnmBISI59qm6ibq7p5vtbV88wV7DJzrv5o8d2oxMin2ibq5qpunq919TxzBbvMnKt/srWMSox8qm2ibq7q5vlaV88zV7DLzLm64NkoQEQZBYgoowCRrWVUYuRTbRN1c1U3z9e6ep65gl1mztWFxXejEiOfapuom6u6eb7W1fPMFewyc67+iRQTQMSzUYDI7hTTtaclkTaeb6LrfJNRdbXtWqM6Ukx3eFoSaeP5JrrONxlVV9uuNaojxXSHpyWRNp5vout8k1F1te1aozpSTACnUUYBIsooQOTMMvq0JNLG8010nW8yqq62XWtUR4rpPk9LIm0830TX+Saj6mrbtUZ1pJgAjuLZKEBkeoppZjJn5qfXNs5G3aiSnutGlRy3a1Qbr4WPG303OjOZM/PHaxtno25USc91o0qO2zWqjddChblltCupUnfcmWeUtN24RknPdaNKjts1qo3XQhHPRgEiyihARBkFiMwtozOTOTM/vbZxNupGlfRcN6rkuF2j2ngtFBl9N9qVVKk77swzStpuXKOk57pRJcftGtXGa6GCFBNAxLNRgMjuFFNd25muz+i8851p5jzXjcq++leLU0x1bWe6PqPzznemmfNcNyr76hVbU0x1bWdal+s40sx57kpA8ZtnowARZRQgoowCRLammOraznR9Rued70wz57luVPbVixanmOrazrQr13GqmfPclYDiFykmgIhnowCR/hRTkszpyjh1jTkZVV3bO1W/tLjl3O8c58wrdNSObb4bTZI5XRmnrjEno6pryz261mjmFTptx3aW0a7vY6lrWzfmZFR1bblH1xrNvEJ9FxPAaab/PzzBnTcaW54RM4q7UYBIZxlNkjldGaeuMSejqmvLPbrWaOYVOnDHNt+Ndn0fS13bujEno6pryz261mjmFeq7mOB7/unZ6NetW/H81KXBizwbBYhIMb3TNlF3vnVzxVdPy6F17SsppldtTDEl6s63bq74qm4mZ+7nrn21az93Phu9fuaVfJoct07d+dbN1QRdF8n1HdD1//K7Zu7nrn21bj97NgoQUUYBIsooQESK6XttE3XnWzdXfFU3kzP3c9e+kmL6no0ppkTd+dbNFV/VzeTM/dy1r6SY4JPm/KUe/sizUYDIc///Rjemp+rajsqEDLdxJs/LR0kx9duYnqprOy0TMtnGmTwvHzVt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" alt="대형 QR코드" style="width: 280px; height: 280px; max-width: 75vw; max-height: 50vh; object-fit: contain; display: block;">
+      </div>
+
+      <div style="background: #eef2ff; border-radius: 10px; padding: 10px; margin-bottom: 16px; border: 1.5px dashed #818cf8;">
+        <span style="font-size: 0.85rem; color: #475569; font-weight: 700;">우리반 입장 방 번호(PIN): </span>
+        <strong style="font-size: 1.3rem; color: #4f46e5; font-weight: 900; letter-spacing: 1px;" id="zoomModalPinText">----</strong>
+      </div>
+
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-secondary" id="btnOpenQrNewTab" style="flex: 1; padding: 10px; font-size: 0.85rem;">⛶ 새 창(새 탭)에서 열기</button>
+        <button class="btn btn-primary" id="btnCloseQrZoomBtn" style="flex: 1; padding: 10px; font-size: 0.85rem;">확인 완료</button>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
