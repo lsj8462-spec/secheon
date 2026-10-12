@@ -664,7 +664,7 @@
   <header>
     <div class="brand">
       <div class="brand-icon">★</div>
-      <div class="brand-title">STREAMS <span style="font-size: 0.65rem; background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 800; margin-left: 2px;">v2.1 클라우드</span></div>
+      <div class="brand-title">STREAMS <span style="font-size: 0.65rem; background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 800; margin-left: 2px;">v2.2 자동완성+타이머개선</span></div>
     </div>
     <div class="header-controls">
       <span id="globalCloudStatus" style="font-size: 0.72rem; color: #94a3b8; font-weight: 700; margin-right: 4px;">서버: 연결 중...</span>
@@ -831,7 +831,7 @@
 
         <!-- 하단 조작 바 -->
         <div class="board-footer-actions">
-          
+          <button class="btn btn-secondary" id="btnAutoFillMissing" style="background: #e0e7ff; color: #4338ca; border: 1.5px solid #818cf8; font-weight: 800;">⚡ 빈 칸 자동 채우기</button>
           <button class="btn btn-danger" id="btnResetSheet">🔄 초기화</button>
           <button class="btn btn-primary" id="btnShowMyScore" style="display: none;">🎉 결과 점수 보기</button>
         </div>
@@ -1287,6 +1287,7 @@
       }
 
       sound.playPop();
+      if (finalTileAutoTimer) { clearTimeout(finalTileAutoTimer); finalTileAutoTimer = null; }
       studentBoard[idx] = currentDrawnNumber;
       placementHistory.push({ index: idx, val: currentDrawnNumber });
 
@@ -1331,7 +1332,7 @@
 
       const pathEl = document.getElementById(`svg-cell-path-${last.index}`);
       const valEl = document.getElementById(`svg-cell-val-${last.index}`);
-      pathEl.className.baseVal = 'cell-path';
+      pathEl.setAttribute("class", "cell-path");
       valEl.textContent = '';
       valEl.classList.remove('is-joker');
 
@@ -1346,7 +1347,7 @@
         studentBoard[i] = null;
         const pathEl = document.getElementById(`svg-cell-path-${i}`);
         const valEl = document.getElementById(`svg-cell-val-${i}`);
-        if (pathEl) pathEl.className.baseVal = 'cell-path';
+        if (pathEl) { pathEl.setAttribute("class", "cell-path"); }
         if (valEl) {
           valEl.textContent = '';
           valEl.classList.remove('is-joker');
@@ -1394,6 +1395,81 @@
       currentDrawnNumber = null;
       updateProgress();
     }
+
+        let lastKnownDrawnTiles = [];
+    let finalTileAutoTimer = null;
+
+    /* 지금까지 나온 타일 목록과 비교하여 빈 칸을 자동으로 채우는 함수 */
+    function autoFillMissingTiles(targetList) {
+      if (!targetList || targetList.length === 0) {
+        showToast('아직 선생님이 뽑은 타일 기록이 없습니다.');
+        return;
+      }
+
+      // 1. 현재 대기 중인 타일이 있다면 먼저 배치
+      if (currentDrawnNumber !== null) {
+        autoPlacePendingNumber();
+      }
+
+      // 2. 현재 보드에 이미 채워진 타일 목록 수집
+      const placedPool = [];
+      for (let i = 0; i < maxCells; i++) {
+        if (studentBoard[i] !== null) {
+          placedPool.push(studentBoard[i]);
+        }
+      }
+
+      // 3. targetList에서 아직 보드에 없는 타일만 추출 (다중 중복 숫자 대응)
+      const missingTiles = [];
+      targetList.forEach(item => {
+        const foundIdx = placedPool.indexOf(item);
+        if (foundIdx !== -1) {
+          placedPool.splice(foundIdx, 1);
+        } else {
+          missingTiles.push(item);
+        }
+      });
+
+      if (missingTiles.length === 0) {
+        return;
+      }
+
+      // 4. 빈 칸 인덱스 추출 및 무작위 셔플
+      const emptyIndices = [];
+      for (let i = 0; i < maxCells; i++) {
+        if (studentBoard[i] === null) emptyIndices.push(i);
+      }
+
+      for (let i = emptyIndices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [emptyIndices[i], emptyIndices[j]] = [emptyIndices[j], emptyIndices[i]];
+      }
+
+      // 5. 빈 칸에 누락된 타일 자동 배치
+      missingTiles.forEach((tileVal, idx) => {
+        if (idx < emptyIndices.length) {
+          const cellIdx = emptyIndices[idx];
+          studentBoard[cellIdx] = tileVal;
+          placementHistory.push({ index: cellIdx, val: tileVal, isAuto: true });
+
+          const pathEl = document.getElementById(`svg-cell-path-${cellIdx}`);
+          const valEl = document.getElementById(`svg-cell-val-${cellIdx}`);
+          if (pathEl) pathEl.classList.add('filled');
+          if (valEl) {
+            valEl.textContent = tileVal;
+            if (tileVal === '★') valEl.classList.add('is-joker');
+          }
+        }
+      });
+
+      sound.playPop();
+      currentDrawnNumber = null;
+      document.getElementById('currentTileText').textContent = '-';
+      document.getElementById('currentTileStateText').textContent = '자동 배치 완료';
+      document.getElementById('currentTileSubText').textContent = '누락된 타일이 빈 칸에 채워졌습니다.';
+      updateProgress();
+    }
+    window.autoFillMissingTiles = autoFillMissingTiles;
 
     function setDrawnNumber(val) {
       currentDrawnNumber = val;
@@ -1490,7 +1566,7 @@
         const nums = [];
         for (let i = range.start; i <= range.end; i++) {
           const pathEl = document.getElementById(`svg-cell-path-${i}`);
-          if (pathEl) pathEl.className.baseVal = `cell-path filled ${colClass}`;
+          if (pathEl) pathEl.setAttribute("class", `cell-path filled ${colClass}`);
           nums.push(studentBoard[i]);
         }
 
@@ -1674,11 +1750,45 @@
               });
             }
           } else if (data.type === 'TILE_DRAWN') {
+            lastKnownDrawnTiles = data.allDrawnTiles || [];
+            const isFinalTile = (data.turn >= maxCells) || (lastKnownDrawnTiles.length >= maxCells);
+
+            // 1. 이전 타일들이 혹시 누락되었는지 확인하여 자동 보정 채우기
+            if (data.allDrawnTiles && data.allDrawnTiles.length > 1) {
+              const priorList = data.allDrawnTiles.slice(0, -1);
+              autoFillMissingTiles(priorList);
+            }
+
+            // 2. 직전 대기 타일이 있다면 빈 칸에 자동 배치
             if (currentDrawnNumber !== null) {
               autoPlacePendingNumber();
             }
+
+            // 3. 새 타일 화면에 표시
             setDrawnNumber(data.tile);
-            showToast(`🎲 [${data.tile === '★' ? '조커(★)' : data.tile + '번'}] 타일 도착! 빈 칸을 터치하세요.`);
+            showToast(`🎲 [${data.tile === '★' ? '조커(★)' : data.tile + '번'}] (${data.turn || lastKnownDrawnTiles.length}/${maxCells}번째) 타일 도착!`);
+
+            // 4. 마지막 20번째 타일인 경우 7초 후 남은 마지막 빈 칸에 자동 배치 타이머 실행
+            if (isFinalTile) {
+              showToast('🏁 마지막 20번째 타일입니다! 원하는 칸을 터치하거나 7초 후 자동 배치됩니다.');
+              if (finalTileAutoTimer) clearTimeout(finalTileAutoTimer);
+              finalTileAutoTimer = setTimeout(() => {
+                const placedCount = studentBoard.filter(v => v !== null).length;
+                if (placedCount < maxCells) {
+                  autoFillMissingTiles(lastKnownDrawnTiles);
+                  showToast('🏁 마지막 타일이 빈 칸에 자동 배치되어 게임이 완료되었습니다!');
+                }
+              }, 7000);
+            }
+          } else if (data.type === 'GAME_FINISH') {
+            lastKnownDrawnTiles = data.allDrawnTiles || lastKnownDrawnTiles;
+            if (finalTileAutoTimer) clearTimeout(finalTileAutoTimer);
+            // 20개가 안 채워진 상태면 누락된 타일로 즉시 채우기
+            const placedCount = studentBoard.filter(v => v !== null).length;
+            if (placedCount < maxCells) {
+              autoFillMissingTiles(lastKnownDrawnTiles);
+              showToast('🏁 선생님이 모든 타일 추첨을 마쳤습니다. 남은 칸이 자동 완성되었습니다!');
+            }
           } else if (data.type === 'GAME_RESET') {
             resetStudentSheet();
             showToast('🔄 선생님이 새 게임을 시작했습니다! 시트가 초기화되었습니다.');
@@ -1953,20 +2063,27 @@
     window.toggleAutoDrawAction = toggleAutoDrawAction;
 
     function startAutoDraw() {
+      // 1. 이미 20개를 모두 뽑았다면 새 게임 자동 초기화 후 시작
       if (teacherDrawnTiles.length >= maxCells) {
-        showToast('이미 모든 타일(20개)이 추첨되었습니다. 새 게임을 시작하세요.');
-        return;
+        initTeacherGame();
+        if (mqttClient && mqttClient.connected) {
+          mqttClient.publish(`streams/v1/${roomPin}/host`, JSON.stringify({
+            type: 'GAME_RESET'
+          }));
+        }
+        showToast('🔄 새 게임을 시작하고 자동 추첨을 진행합니다!');
       }
+
       isAutoDrawing = true;
       const toggleBtn = document.getElementById('btnAutoDrawToggle');
       if (toggleBtn) toggleBtn.style.background = '#ef4444';
       const toggleText = document.getElementById('autoDrawToggleText');
       if (toggleText) toggleText.textContent = '⏸ 일시정지';
 
-      if (teacherDrawnTiles.length === 0) {
-        hostDrawTile();
-      }
+      // 2. 시작 즉시 다음 타일 1개를 바로 뽑음! (지연 없이 즉각 반응)
+      hostDrawTile();
 
+      // 3. 타이머 카운트다운 시작
       resetTimerCountdown();
 
       if (autoDrawInterval) clearInterval(autoDrawInterval);
@@ -2041,6 +2158,7 @@
     function hostDrawTile() {
       if (teacherDrawnTiles.length >= maxCells || teacherTilePool.length === 0) {
         showToast('🏁 20개의 타일을 모두 뽑았습니다!');
+        stopAutoDraw();
         return;
       }
 
@@ -2055,10 +2173,13 @@
       speakTile(tile);
       updateTeacherUI();
 
+      // 연결된 학생들에게 전체 누적 타일 목록(allDrawnTiles)과 함께 브로드캐스트
       if (mqttClient && mqttClient.connected) {
         mqttClient.publish(`streams/v1/${roomPin}/host`, JSON.stringify({
           type: 'TILE_DRAWN',
-          tile: tile
+          tile: tile,
+          turn: teacherDrawnTiles.length,
+          allDrawnTiles: [...teacherDrawnTiles]
         }));
       }
 
@@ -2066,6 +2187,15 @@
         document.getElementById('btnHostDraw').disabled = true;
         sound.playFanfare();
         triggerConfetti();
+        stopAutoDraw();
+
+        // 20번째 마지막 타일 추첨 완료 신호 전송
+        if (mqttClient && mqttClient.connected) {
+          mqttClient.publish(`streams/v1/${roomPin}/host`, JSON.stringify({
+            type: 'GAME_FINISH',
+            allDrawnTiles: [...teacherDrawnTiles]
+          }));
+        }
       }
     }
 
@@ -2295,7 +2425,9 @@
 
     function triggerConfetti() {
       const canvas = document.getElementById('confettiCanvas');
+      if (!canvas || !canvas.getContext) return;
       const ctx = canvas.getContext('2d');
+      if (!ctx) return;
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
 
