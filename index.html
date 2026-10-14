@@ -664,7 +664,7 @@
   <header>
     <div class="brand">
       <div class="brand-icon">★</div>
-      <div class="brand-title">STREAMS <span style="font-size: 0.65rem; background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 800; margin-left: 2px;">v2.3 원클릭 새게임(PIN유지)</span></div>
+      <div class="brand-title">STREAMS <span style="font-size: 0.65rem; background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 800; margin-left: 2px;">v2.4 학생정렬·중복제거·랭킹개선</span></div>
     </div>
     <div class="header-controls">
       <span id="globalCloudStatus" style="font-size: 0.72rem; color: #94a3b8; font-weight: 700; margin-right: 4px;">서버: 연결 중...</span>
@@ -1623,7 +1623,11 @@
     let studentTargetPin = '';
     let myStudentNameStr = '';
     let studentJoinTimer = null;
-    let myStudentId = 's_' + Math.random().toString(36).substring(2, 9);
+    let myStudentId = safeStorage.getItem('streams_my_student_id');
+    if (!myStudentId) {
+      myStudentId = 's_' + Math.random().toString(36).substring(2, 9);
+      safeStorage.setItem('streams_my_student_id', myStudentId);
+    }
     let roomPin = '';
     const connectedStudentsMap = new Map();
 
@@ -1697,13 +1701,28 @@
         // 1. 교사용 수신 처리 (학생이 보낸 메시지)
         if (isTeacherHosting && topic === `streams/v1/${roomPin}/teacher`) {
           if (data.type === 'JOIN') {
+            const normalizedName = (data.name || '').trim();
+            let preservedScore = null;
+            let isReconnect = false;
+
+            // 학년반번호_이름이 동일한 기존 항목이 있으면 모두 삭제하여 1명만 남김 (점수는 보존)
+            for (const [sid, info] of connectedStudentsMap.entries()) {
+              if ((info.name || '').trim() === normalizedName) {
+                isReconnect = true;
+                if (info.score !== null && info.score !== undefined) {
+                  preservedScore = info.score;
+                }
+                connectedStudentsMap.delete(sid);
+              }
+            }
+
             connectedStudentsMap.set(data.studentId, {
-              name: data.name,
-              score: null,
+              name: normalizedName,
+              score: preservedScore,
               studentId: data.studentId
             });
             updateConnectedStudentsUI();
-            showToast(`🙋‍♂️ [${data.name}] 학생 입장!`);
+            showToast(isReconnect ? `🔄 [${normalizedName}] 학생 재접속 (중복 자동 정리)` : `🙋‍♂️ [${normalizedName}] 학생 입장!`);
 
             // 해당 학생에게 즉시 입장 승인(WELCOME) 및 현재 게임 상태 동기화 응답
             const replyTopic = `streams/v1/${roomPin}/student/${data.studentId}`;
@@ -1713,14 +1732,23 @@
               drawnTiles: teacherDrawnTiles
             }));
           } else if (data.type === 'SUBMIT_SCORE') {
-            const studentInfo = connectedStudentsMap.get(data.studentId) || { name: data.name };
-            studentInfo.score = data.score;
-            connectedStudentsMap.set(data.studentId, studentInfo);
+            const normalizedName = (data.name || '').trim();
+            // 동일 학년반번호_이름 중복 항목 정리
+            for (const [sid, info] of connectedStudentsMap.entries()) {
+              if ((info.name || '').trim() === normalizedName && sid !== data.studentId) {
+                connectedStudentsMap.delete(sid);
+              }
+            }
+            connectedStudentsMap.set(data.studentId, {
+              name: normalizedName,
+              score: data.score,
+              studentId: data.studentId
+            });
 
-            addStudentScoreToLeaderboard(data.name, data.score);
+            addStudentScoreToLeaderboard(normalizedName, data.score);
             updateConnectedStudentsUI();
             sound.playFanfare();
-            showToast(`🎉 [${data.name}] ${data.score}점 자동 접수!`);
+            showToast(`🎉 [${normalizedName}] ${data.score}점 자동 접수!`);
           }
         }
 
@@ -1806,7 +1834,7 @@
           } else if (data.type === 'SET_GAME_MODE') {
             applyGameMode(data.gameMode, false);
           } else if (data.type === 'KICK') {
-            if (data.targetId === myStudentId) {
+            if (data.targetId === myStudentId || (data.targetName && data.targetName === myStudentNameStr)) {
               isStudentConnected = false;
               resetStudentSheet();
 
@@ -1873,18 +1901,24 @@
     function kickStudent(studentId) {
       const info = connectedStudentsMap.get(studentId);
       if (!info) return;
-      const studentName = info.name;
+      const studentName = (info.name || '').trim();
 
       if (mqttClient && mqttClient.connected) {
         mqttClient.publish(`streams/v1/${roomPin}/host`, JSON.stringify({
           type: 'KICK',
           targetId: studentId,
+          targetName: studentName,
           reason: '⚠️ 닉네임 대신 본인 이름(예: 1번 김철수)으로 다시 입장해주세요!'
         }));
       }
 
-      connectedStudentsMap.delete(studentId);
-      classScores = classScores.filter(x => x.name !== studentName);
+      // 동일 이름의 모든 세션 삭제
+      for (const [sid, entry] of connectedStudentsMap.entries()) {
+        if ((entry.name || '').trim() === studentName || sid === studentId) {
+          connectedStudentsMap.delete(sid);
+        }
+      }
+      classScores = classScores.filter(x => (x.name || '').trim() !== studentName);
       renderLeaderboard();
       updateConnectedStudentsUI();
       showToast(`⛔ [${studentName}] 학생을 퇴장 처리했습니다.`);
@@ -1894,17 +1928,37 @@
       const listEl = document.getElementById('studentsChipList');
       const countEl = document.getElementById('connectedStudentCount');
 
-      countEl.textContent = connectedStudentsMap.size;
+      // 1. 학년반번호_이름 기준 중복 완전 제거 (나중에 접속한 중복 항목 자동 정리하여 1명만 유지)
+      const uniqueByName = new Map();
+      for (const [sid, info] of connectedStudentsMap.entries()) {
+        const key = (info.name || '').trim();
+        if (!key) continue;
+        if (uniqueByName.has(key)) {
+          const prev = uniqueByName.get(key);
+          // 이전 항목 삭제하고 최신 세션 ID 유지 (점수가 있었다면 보존)
+          connectedStudentsMap.delete(prev.sid);
+          const mergedScore = (info.score !== null && info.score !== undefined) ? info.score : prev.info.score;
+          info.score = mergedScore;
+        }
+        uniqueByName.set(key, { sid, info });
+      }
 
-      if (connectedStudentsMap.size === 0) {
+      // 2. 학년반번호_이름 오름차순(숫자 및 가나다 순) 자동 정렬
+      const sortedStudents = Array.from(uniqueByName.values()).sort((a, b) =>
+        (a.info.name || '').localeCompare(b.info.name || '', 'ko-KR', { numeric: true })
+      );
+
+      countEl.textContent = sortedStudents.length;
+
+      if (sortedStudents.length === 0) {
         listEl.innerHTML = '<span style="color: #64748b; font-size: 0.8rem;">아직 접속한 학생이 없습니다.</span>';
         return;
       }
 
       listEl.innerHTML = '';
-      connectedStudentsMap.forEach((info, sid) => {
+      sortedStudents.forEach(({ sid, info }) => {
         const badge = document.createElement('div');
-        const hasScore = info.score !== null;
+        const hasScore = info.score !== null && info.score !== undefined;
         badge.className = `student-badge-item ${hasScore ? 'submitted' : ''}`;
         badge.innerHTML = `
           <span>${hasScore ? '✅' : '🟢'}</span>
@@ -2297,9 +2351,14 @@
         let ceremonyStage = 0;
     let revealedRanksSet = new Set();
     let rollTimer = null;
+    let latestRevealedRankIdx = null;
 
     function renderLeaderboard() {
-      classScores.sort((a, b) => b.score - a.score);
+      // 점수 내림차순 정렬, 동점일 경우 학번_이름 오름차순 정렬
+      classScores.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return (a.name || '').localeCompare(b.name || '', 'ko-KR', { numeric: true });
+      });
       const tbody = document.getElementById('rankingTableBody');
       tbody.innerHTML = '';
 
@@ -2327,27 +2386,50 @@
         if (!revealedRanksSet.has(index)) return;
 
         const rank = index + 1;
+        const isJustRevealed = (index === latestRevealedRankIdx);
         const row = document.createElement('tr');
         row.className = `ranking-row rank-${rank} ${item.isNew ? 'new-entry' : ''}`;
         row.id = `rank-row-${index}`;
 
-        let medalClass = '';
-        if (rank === 1) medalClass = 'background:#fef08a; color:#854d0e; font-size:1.1rem; box-shadow:0 0 10px #fef08a;';
-        else if (rank === 2) medalClass = 'background:#e2e8f0; color:#475569; font-size:1rem;';
-        else if (rank === 3) medalClass = 'background:#fed7aa; color:#9a3412; font-size:1rem;';
+        if (rank === 1) row.style.background = '#fef9c3';
+        else if (rank === 2) row.style.background = '#f1f5f9';
+        else if (rank === 3) row.style.background = '#ffedd5';
+        else if (isJustRevealed) row.style.background = '#eef2ff';
+
+        let medalClass = 'width:28px; height:28px; line-height:28px; font-size:0.92rem;';
+        if (rank === 1) medalClass = 'width:34px; height:34px; line-height:34px; background:#fef08a; color:#854d0e; font-size:1.15rem; box-shadow:0 0 10px #facc15;';
+        else if (rank === 2) medalClass = 'width:32px; height:32px; line-height:32px; background:#e2e8f0; color:#334155; font-size:1.05rem;';
+        else if (rank === 3) medalClass = 'width:32px; height:32px; line-height:32px; background:#fed7aa; color:#9a3412; font-size:1.05rem;';
+
+        // 학생 이름을 훨씬 크게 표시 (교실 전자칠판 가독성 극대화)
+        let nameStyle = 'font-size: 1.25rem; font-weight: 900; color: #0f172a; letter-spacing: -0.3px; padding: 10px 12px;';
+        if (rank === 1) nameStyle = 'font-size: 1.5rem; font-weight: 900; color: #b45309; letter-spacing: -0.4px; padding: 12px;';
+        else if (rank === 2) nameStyle = 'font-size: 1.38rem; font-weight: 900; color: #1e293b; letter-spacing: -0.3px; padding: 11px 12px;';
+        else if (rank === 3) nameStyle = 'font-size: 1.32rem; font-weight: 900; color: #9a3412; letter-spacing: -0.3px; padding: 11px 12px;';
+
+        let scoreSize = rank <= 3 ? '1.35rem' : '1.2rem';
 
         row.innerHTML = `
-          <td><span class="rank-medal" style="${medalClass}">${rank}</span></td>
-          <td style="font-weight: 800; color: #1e293b;">${escapeHtml(item.name)}</td>
-          <td style="text-align: right; color: ${rank === 1 ? '#ea580c' : '#4f46e5'}; font-weight: 900; font-size: 1.1rem;">${item.score}점</td>
-          <td style="text-align: right; font-size: 0.8rem; color: #10b981; font-weight: 700;">완료</td>
+          <td style="padding: 10px 12px;"><span class="rank-medal" style="${medalClass}">${rank}</span></td>
+          <td style="${nameStyle}">${escapeHtml(item.name)}</td>
+          <td style="text-align: right; color: ${rank === 1 ? '#ea580c' : '#4f46e5'}; font-weight: 900; font-size: ${scoreSize}; padding: 10px 12px;">${item.score}점</td>
+          <td style="text-align: right; font-size: 0.85rem; color: #10b981; font-weight: 800; padding: 10px 12px;">완료</td>
         `;
         tbody.appendChild(row);
       });
 
+      // 꼴찌부터 4위, 3위, 2위, 1위로 올라가는 동안 새로 공개된 상위 순위(상단)로 스크롤이 자동으로 올라가도록 처리
       const scrollWrap = document.querySelector('.ranking-scroll-container');
-      if (scrollWrap && ceremonyStage === 1) {
-        scrollWrap.scrollTop = scrollWrap.scrollHeight;
+      if (scrollWrap && ceremonyStage >= 1 && ceremonyStage <= 4) {
+        scrollWrap.scrollTop = 0;
+        if (latestRevealedRankIdx !== null) {
+          const revealedRow = document.getElementById(`rank-row-${latestRevealedRankIdx}`);
+          if (revealedRow && typeof revealedRow.scrollIntoView === 'function') {
+            try {
+              revealedRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (e) {}
+          }
+        }
       }
     }
 
@@ -2421,6 +2503,7 @@
         rollTimer = setInterval(() => {
           if (stepIdx < remainingIndices.length) {
             const rIdx = remainingIndices[stepIdx];
+            latestRevealedRankIdx = rIdx;
             revealedRanksSet.add(rIdx);
             renderLeaderboard();
             sound.playPop();
@@ -2435,6 +2518,7 @@
         }, 320);
       } else if (ceremonyStage === 2) {
         if (count >= 3) {
+          latestRevealedRankIdx = 2;
           revealedRanksSet.add(2);
           sound.playTone(550, 'triangle', 0.3, 0.18);
           renderLeaderboard();
@@ -2444,6 +2528,7 @@
         updateCeremonyButton();
       } else if (ceremonyStage === 3) {
         if (count >= 2) {
+          latestRevealedRankIdx = 1;
           revealedRanksSet.add(1);
           sound.playTone(700, 'triangle', 0.35, 0.18);
           renderLeaderboard();
@@ -2453,6 +2538,7 @@
         updateCeremonyButton();
       } else if (ceremonyStage === 4) {
         if (count >= 1) {
+          latestRevealedRankIdx = 0;
           revealedRanksSet.add(0);
           sound.playFanfare();
           triggerConfetti();
@@ -2463,6 +2549,7 @@
         updateCeremonyButton();
       } else if (ceremonyStage === 5) {
         ceremonyStage = 0;
+        latestRevealedRankIdx = null;
         revealedRanksSet.clear();
         updateCeremonyButton();
         renderLeaderboard();
